@@ -1131,6 +1131,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
           id: element.id,
           transform: element.style.transform,
           width: element.style.width,
+          logoEmbedded: element.querySelector('.invoice-logo').src.startsWith('data:image/png;base64,'),
           typographyEmbedded: [
             element,
             element.querySelector('.invoice-heading-block h2'),
@@ -1162,7 +1163,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     while (!document.querySelector('#outputDialog').open) await new Promise(resolve => setTimeout(resolve, 0));
     const openBeforeSave = document.querySelector('#outputDialog').open;
     document.querySelector('#savePdfButton').click();
-    await new Promise(resolve => setTimeout(resolve, 0));
+    while (!captured.saved) await new Promise(resolve => setTimeout(resolve, 0));
     return JSON.stringify({
       openBeforeSave,
       openAfterSave: document.querySelector('#outputDialog').open,
@@ -1192,7 +1193,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     searchableCustomer: true,
     textMode: "invisible",
     language: "en-SG",
-    element: { id: "", transform: "none", width: "793px", typographyEmbedded: true },
+    element: { id: "", transform: "none", width: "793px", logoEmbedded: true, typographyEmbedded: true },
     saved: true,
     busy: "false",
     focused: "printButton",
@@ -1640,12 +1641,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v37'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v38'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,
@@ -1667,7 +1668,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   let activation;
   handlers.activate({ waitUntil: (promise) => { activation = promise; } });
   await activation;
-  assert.deepEqual(deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36"]);
+  assert.deepEqual(deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37"]);
 
   if (!await evaluate(page, "Boolean(navigator.serviceWorker.controller)")) {
     await page.send("Page.reload", { ignoreCache: true });

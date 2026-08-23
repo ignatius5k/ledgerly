@@ -132,13 +132,14 @@ test("activation removes only previous Invoice Studio caches", async () => {
   worker.stores.set("invoice-studio-v34", new Map());
   const runtimeUrl = `${SCOPE}vendor/html2pdf.bundle.min.js?v=32`;
   worker.stores.set("invoice-studio-v35", new Map());
-  worker.stores.set("invoice-studio-v36", new Map([[runtimeUrl, new Response("warmed PDF runtime")]]));
+  worker.stores.set("invoice-studio-v36", new Map());
+  worker.stores.set("invoice-studio-v37", new Map([[runtimeUrl, new Response("warmed PDF runtime")]]));
   worker.stores.set("unrelated-cache", new Map());
   let activation;
   worker.handlers.activate({ waitUntil(value) { activation = value; } });
   await activation;
-  assert.deepEqual(worker.deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36"]);
-  assert.equal(await (await worker.stores.get("invoice-studio-v37").get(runtimeUrl)).text(), "warmed PDF runtime");
+  assert.deepEqual(worker.deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37"]);
+  assert.equal(await (await worker.stores.get("invoice-studio-v38").get(runtimeUrl)).text(), "warmed PDF runtime");
   assert.equal(worker.clientsClaimed, 1);
   assert.equal(worker.stores.has("unrelated-cache"), true);
 });
@@ -156,7 +157,7 @@ test("query-string navigations are network-only and never cached", async () => {
 });
 
 test("only managed shell and runtime requests are cached and used offline", async () => {
-  const shellUrl = `${SCOPE}app.js?v=37`;
+  const shellUrl = `${SCOPE}app.js?v=38`;
   const worker = await loadWorker(async () => new Response("fresh shell"));
   const onlineEvent = dispatchFetch(worker.handlers.fetch, {
     method: "GET",
@@ -165,7 +166,7 @@ test("only managed shell and runtime requests are cached and used offline", asyn
   });
   assert.equal(await (await onlineEvent.response()).text(), "fresh shell");
   await Promise.all(onlineEvent.lifetime);
-  assert.deepEqual(worker.cachePuts, [{ cacheName: "invoice-studio-v37", key: shellUrl }]);
+  assert.deepEqual(worker.cachePuts, [{ cacheName: "invoice-studio-v38", key: shellUrl }]);
 
   const runtimeUrl = `${SCOPE}vendor/html2pdf.bundle.min.js?v=32`;
   const runtimeEvent = dispatchFetch(worker.handlers.fetch, {
@@ -176,8 +177,8 @@ test("only managed shell and runtime requests are cached and used offline", asyn
   assert.equal(await (await runtimeEvent.response()).text(), "fresh shell");
   await Promise.all(runtimeEvent.lifetime);
   assert.deepEqual(worker.cachePuts, [
-    { cacheName: "invoice-studio-v37", key: shellUrl },
-    { cacheName: "invoice-studio-v37", key: runtimeUrl },
+    { cacheName: "invoice-studio-v38", key: shellUrl },
+    { cacheName: "invoice-studio-v38", key: runtimeUrl },
   ]);
 
   worker.setFetch(async () => { throw new Error("offline"); });

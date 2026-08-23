@@ -2172,7 +2172,22 @@ function loadPdfLibrary() {
   return pdfLibraryPromise;
 }
 
-function createPdfExportSheet() {
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(reader.result), { once: true });
+    reader.addEventListener("error", () => reject(reader.error || new Error("The invoice logo could not be read.")), { once: true });
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function embeddedImageSource(image) {
+  const response = await fetch(image.currentSrc || image.src, { cache: "force-cache" });
+  if (!response.ok) throw new Error("The invoice logo could not be loaded.");
+  return blobToDataUrl(await response.blob());
+}
+
+async function createPdfExportSheet() {
   const exportSheet = invoiceSheet.cloneNode(true);
   const sourceElements = [invoiceSheet, ...invoiceSheet.querySelectorAll("*")];
   const exportElements = [exportSheet, ...exportSheet.querySelectorAll("*")];
@@ -2185,6 +2200,15 @@ function createPdfExportSheet() {
       exportElement.style.setProperty(property, computedStyle.getPropertyValue(property));
     }
   });
+
+  const sourceImages = [...invoiceSheet.querySelectorAll("img")];
+  const exportImages = [...exportSheet.querySelectorAll("img")];
+  await Promise.all(sourceImages.map(async (sourceImage, index) => {
+    const exportImage = exportImages[index];
+    exportImage.removeAttribute("srcset");
+    exportImage.src = await embeddedImageSource(sourceImage);
+    if (typeof exportImage.decode === "function") await exportImage.decode();
+  }));
 
   exportSheet.removeAttribute("id");
   exportSheet.style.width = `${Math.floor(PAPER_WIDTH)}px`;
@@ -2207,7 +2231,7 @@ async function downloadInvoicePdf() {
     await loadPdfLibrary();
     const pdfBaseName = safePdfFileName(state.pdfFileName, state.invoiceNumber);
     const pdfFileName = `${pdfBaseName}.pdf`;
-    const exportSheet = createPdfExportSheet();
+    const exportSheet = await createPdfExportSheet();
     const worker = window
       .html2pdf()
       .set({
