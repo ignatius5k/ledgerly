@@ -1053,6 +1053,14 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.equal(printBehavior.titleDuringPrint, "August - Brew Invoice.pdf");
   assert.equal(printBehavior.titleAfterPrint, printBehavior.titleBeforePrint);
 
+  await page.send("Emulation.setEmulatedMedia", { media: "print" });
+  const printVisibility = JSON.parse(await evaluate(page, `JSON.stringify({
+    skipLink: getComputedStyle(document.querySelector('.skip-link')).display,
+    invoiceTransform: getComputedStyle(document.querySelector('#invoiceSheet')).transform
+  })`));
+  assert.deepEqual(printVisibility, { skipLink: "none", invoiceTransform: "none" });
+  await page.send("Emulation.setEmulatedMedia", { media: "" });
+
   const browserPrintResult = await page.send("Page.printToPDF", {
     displayHeaderFooter: false,
     printBackground: true,
@@ -1087,12 +1095,11 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.ok(mobileDialog.right <= mobileDialog.viewport);
   assert.equal(mobileDialog.fileName, "August - Brew Invoice.pdf");
   mobileDialog.optionHeights.forEach((height) => assert.ok(height >= 76));
-  await page.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 
   await browser.send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: profile, eventsEnabled: true });
   const downloadedPdfPath = join(profile, "August - Brew Invoice.pdf");
   await evaluate(page, `(() => {
-    document.querySelector('#printButton').click();
+    document.querySelector('#mobilePrintButton').click();
     return true;
   })()`);
   await waitFor(() => evaluate(page, "document.querySelector('#outputDialog').open"));
@@ -1113,12 +1120,29 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.equal(generatedPdf.subarray(0, 4).toString(), "%PDF");
   assert.equal((generatedPdf.toString("latin1").match(/\/Type \/Page\b/g) || []).length, 1);
   await waitFor(() => evaluate(page, "document.querySelector('#outputDialog').open === false"));
+  await page.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 
   const pdfDownload = JSON.parse(await evaluate(page, `(async () => {
     const captured = {};
     const worker = {
       set(options) { captured.options = options; return this; },
-      from(element) { captured.element = { id: element.id, transform: element.style.transform, width: element.style.width }; return this; },
+      from(element) {
+        captured.element = {
+          id: element.id,
+          transform: element.style.transform,
+          width: element.style.width,
+          typographyEmbedded: [
+            element,
+            element.querySelector('.invoice-heading-block h2'),
+            element.querySelector('.invoice-party'),
+            element.querySelector('.invoice-table'),
+            element.querySelector('.invoice-notes'),
+            element.querySelector('.payment-detail'),
+            element.querySelector('.invoice-footer')
+          ].every(node => Boolean(node.style.fontSize && node.style.lineHeight))
+        };
+        return this;
+      },
       toPdf() { captured.toPdf = true; return this; },
       get(key) { captured.get = key; return this; },
       then(callback) {
@@ -1168,7 +1192,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     searchableCustomer: true,
     textMode: "invisible",
     language: "en-SG",
-    element: { id: "", transform: "none", width: "793px" },
+    element: { id: "", transform: "none", width: "793px", typographyEmbedded: true },
     saved: true,
     busy: "false",
     focused: "printButton",
@@ -1616,12 +1640,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v36'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v37'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,
@@ -1643,7 +1667,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   let activation;
   handlers.activate({ waitUntil: (promise) => { activation = promise; } });
   await activation;
-  assert.deepEqual(deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35"]);
+  assert.deepEqual(deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36"]);
 
   if (!await evaluate(page, "Boolean(navigator.serviceWorker.controller)")) {
     await page.send("Page.reload", { ignoreCache: true });

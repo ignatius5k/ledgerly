@@ -1030,6 +1030,8 @@ input[readonly] {
   width: 210mm;
   min-height: 297mm;
   padding: 19.4mm 23mm 20mm 18.3mm;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
   color: #0c0d0f;
   background: var(--paper);
   box-shadow: 0 14px 44px rgb(48 51 57 / 0.16), 0 2px 8px rgb(48 51 57 / 0.1);
@@ -1773,6 +1775,7 @@ noscript {
   .editor-panel,
   .preview-toolbar,
   .output-dialog,
+  .skip-link,
   .toast {
     display: none !important;
   }

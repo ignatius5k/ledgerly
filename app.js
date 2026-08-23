@@ -2172,6 +2172,30 @@ function loadPdfLibrary() {
   return pdfLibraryPromise;
 }
 
+function createPdfExportSheet() {
+  const exportSheet = invoiceSheet.cloneNode(true);
+  const sourceElements = [invoiceSheet, ...invoiceSheet.querySelectorAll("*")];
+  const exportElements = [exportSheet, ...exportSheet.querySelectorAll("*")];
+
+  sourceElements.forEach((sourceElement, index) => {
+    const computedStyle = window.getComputedStyle(sourceElement);
+    const exportElement = exportElements[index];
+    for (let propertyIndex = 0; propertyIndex < computedStyle.length; propertyIndex += 1) {
+      const property = computedStyle[propertyIndex];
+      exportElement.style.setProperty(property, computedStyle.getPropertyValue(property));
+    }
+  });
+
+  exportSheet.removeAttribute("id");
+  exportSheet.style.width = `${Math.floor(PAPER_WIDTH)}px`;
+  exportSheet.style.height = "auto";
+  exportSheet.style.minHeight = `${Math.floor(PAPER_HEIGHT) - 1}px`;
+  exportSheet.style.margin = "0";
+  exportSheet.style.boxShadow = "none";
+  exportSheet.style.transform = "none";
+  return exportSheet;
+}
+
 async function downloadInvoicePdf() {
   if (!invoiceIsReady("saving")) {
     dismissOutputDialog();
@@ -2183,13 +2207,7 @@ async function downloadInvoicePdf() {
     await loadPdfLibrary();
     const pdfBaseName = safePdfFileName(state.pdfFileName, state.invoiceNumber);
     const pdfFileName = `${pdfBaseName}.pdf`;
-    const exportSheet = invoiceSheet.cloneNode(true);
-    exportSheet.removeAttribute("id");
-    exportSheet.style.width = `${Math.floor(PAPER_WIDTH)}px`;
-    exportSheet.style.minHeight = `${Math.floor(PAPER_HEIGHT) - 1}px`;
-    exportSheet.style.margin = "0";
-    exportSheet.style.boxShadow = "none";
-    exportSheet.style.transform = "none";
+    const exportSheet = createPdfExportSheet();
     const worker = window
       .html2pdf()
       .set({
