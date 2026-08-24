@@ -387,6 +387,45 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.equal(semantics.totalAtomic, "true");
   assert.equal(semantics.placeholders, 0);
 
+  const negativePriceTotals = JSON.parse(await evaluate(page, `(() => {
+    const setValue = (input, value) => {
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const firstRow = document.querySelector('.item-row');
+    setValue(firstRow.querySelector('[data-item-field="quantity"]'), '2');
+    setValue(firstRow.querySelector('[data-item-field="description"]'), 'Service');
+    setValue(firstRow.querySelector('[data-item-field="price"]'), '100');
+    document.querySelector('#addItemButton').click();
+    const secondRow = document.querySelectorAll('.item-row')[1];
+    setValue(secondRow.querySelector('[data-item-field="quantity"]'), '1');
+    setValue(secondRow.querySelector('[data-item-field="description"]'), 'Discount');
+    const negativePrice = secondRow.querySelector('[data-item-field="price"]');
+    setValue(negativePrice, '-25.50');
+    const result = {
+      min: negativePrice.min,
+      valid: negativePrice.validity.valid,
+      help: document.querySelector('#itemPriceHelp').textContent,
+      lineAmounts: [...document.querySelectorAll('#previewItems .amount-value')].map((amount) => amount.textContent),
+      previewTotal: document.querySelector('#previewTotal').textContent,
+      editorTotal: document.querySelector('#editorTotal').textContent,
+    };
+    document.querySelectorAll('.remove-item')[1].click();
+    const resetRow = document.querySelector('.item-row');
+    setValue(resetRow.querySelector('[data-item-field="quantity"]'), '1');
+    setValue(resetRow.querySelector('[data-item-field="description"]'), '');
+    setValue(resetRow.querySelector('[data-item-field="price"]'), '');
+    return JSON.stringify(result);
+  })()`));
+  assert.deepEqual(negativePriceTotals, {
+    min: "-999999999.99",
+    valid: true,
+    help: "Use a negative unit price for a discount or credit. It will be subtracted from the total.",
+    lineAmounts: ["200.00", "-25.50"],
+    previewTotal: "174.50",
+    editorTotal: "$174.50",
+  });
+
   const invoiceAlignment = JSON.parse(await evaluate(page, `(() => {
     const topSymbol = document.querySelector('#previewItems .amount-symbol').getBoundingClientRect();
     const totalSymbol = document.querySelector('.invoice-table tfoot td:first-of-type').getBoundingClientRect();
@@ -1641,12 +1680,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v38'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v39'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,
@@ -1668,7 +1707,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   let activation;
   handlers.activate({ waitUntil: (promise) => { activation = promise; } });
   await activation;
-  assert.deepEqual(deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37"]);
+  assert.deepEqual(deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38"]);
 
   if (!await evaluate(page, "Boolean(navigator.serviceWorker.controller)")) {
     await page.send("Page.reload", { ignoreCache: true });

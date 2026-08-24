@@ -7,6 +7,7 @@ const PAPER_WIDTH = 793.7;
 const PAPER_HEIGHT = 1122.52;
 const MAX_QUANTITY = 9999;
 const MAX_PRICE = 999999999.99;
+const MIN_PRICE = -MAX_PRICE;
 const MAX_ITEM_DESCRIPTION_LENGTH = 1000;
 const MAX_BILL_TO_LENGTH = 2000;
 const HISTORY_PAGE_SIZE = 25;
@@ -1249,7 +1250,7 @@ function invoiceTotalFor(invoice) {
       && quantity >= 1
       && quantity <= MAX_QUANTITY
       && Number.isFinite(price)
-      && price >= 0
+      && price >= MIN_PRICE
       && price <= MAX_PRICE;
     return valid && Number.isFinite(total) ? total + quantity * price : Number.NaN;
   }, 0);
@@ -1733,7 +1734,7 @@ function renderItemsEditor() {
 
     const price = document.createElement("input");
     price.type = "number";
-    price.min = "0";
+    price.min = String(MIN_PRICE);
     price.max = String(MAX_PRICE);
     price.step = "0.01";
     price.inputMode = "decimal";
@@ -1741,6 +1742,7 @@ function renderItemsEditor() {
     price.required = true;
     price.dataset.itemField = "price";
     price.setAttribute("aria-label", `Unit price for item ${index + 1}`);
+    price.setAttribute("aria-describedby", "itemPriceHelp");
 
     const remove = document.createElement("button");
     remove.type = "button";
@@ -1803,7 +1805,7 @@ function renderPreview() {
       && quantity >= 1
       && quantity <= MAX_QUANTITY
       && Number.isFinite(price)
-      && price >= 0
+      && price >= MIN_PRICE
       && price <= MAX_PRICE;
     amount.textContent = validAmount ? formatAmount(quantity * price) : "-";
     amount.className = "amount-value";
@@ -1988,7 +1990,7 @@ function fieldErrorMessage(input) {
     billTo: "Enter a customer or company name.",
     quantity: "Enter a whole-number quantity of at least 1.",
     description: "Enter an item description.",
-    price: "Enter a price of 0 or more.",
+    price: "Enter a price from -$999,999,999.99 to $999,999,999.99.",
   };
   if (input.dataset.field === "dueDate" && hasInvalidDateOrder()) {
     return "Due date cannot be earlier than the invoice date.";
