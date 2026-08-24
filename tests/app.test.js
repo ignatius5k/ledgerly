@@ -397,6 +397,8 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     setValue(firstRow.querySelector('[data-item-field="description"]'), 'Service');
     setValue(firstRow.querySelector('[data-item-field="price"]'), '100');
     document.querySelector('#addItemButton').click();
+    const totalAfterAddingItem = document.querySelector('#editorTotal').textContent;
+    const previewAfterAddingItem = document.querySelector('#previewTotal').textContent;
     const secondRow = document.querySelectorAll('.item-row')[1];
     setValue(secondRow.querySelector('[data-item-field="quantity"]'), '1');
     setValue(secondRow.querySelector('[data-item-field="description"]'), 'Discount');
@@ -406,6 +408,8 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
       min: negativePrice.min,
       valid: negativePrice.validity.valid,
       help: document.querySelector('#itemPriceHelp').textContent,
+      totalAfterAddingItem,
+      previewAfterAddingItem,
       lineAmounts: [...document.querySelectorAll('#previewItems .amount-value')].map((amount) => amount.textContent),
       previewTotal: document.querySelector('#previewTotal').textContent,
       editorTotal: document.querySelector('#editorTotal').textContent,
@@ -421,6 +425,8 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     min: "-999999999.99",
     valid: true,
     help: "Use a negative unit price for a discount or credit. It will be subtracted from the total.",
+    totalAfterAddingItem: "$200.00",
+    previewAfterAddingItem: "200.00",
     lineAmounts: ["200.00", "-25.50"],
     previewTotal: "174.50",
     editorTotal: "$174.50",
@@ -722,7 +728,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     focused: document.activeElement.dataset.itemField,
     toast: document.querySelector('#toast').textContent
   })`));
-  assert.deepEqual(itemState, { rows: 4, quantity: "2.8", quantityValid: false, total: "Unavailable", focused: "description", toast: "Item 2 removed. 4 items remaining." });
+  assert.deepEqual(itemState, { rows: 4, quantity: "2.8", quantityValid: false, total: "$0.00", focused: "description", toast: "Item 2 removed. 4 items remaining." });
 
   const blankArrowQuantity = await evaluate(page, `(() => {
     const quantity = document.querySelector('[data-item-field="quantity"]');
@@ -751,7 +757,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     rerendered.dispatchEvent(new Event('input', { bubbles: true }));
     return JSON.stringify(result);
   })()`));
-  assert.deepEqual(blankQuantityRerender, { value: "", valid: false, invalid: "true", total: "Unavailable", dialogOpen: false });
+  assert.deepEqual(blankQuantityRerender, { value: "", valid: false, invalid: "true", total: "$0.00", dialogOpen: false });
 
   const blankPriceTotal = await evaluate(page, `(() => {
     const price = document.querySelector('[data-item-field="price"]');
@@ -762,7 +768,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     price.dispatchEvent(new Event('input', { bubbles: true }));
     return total;
   })()`);
-  assert.equal(blankPriceTotal, "Unavailable");
+  assert.equal(blankPriceTotal, "$0.00");
 
   const longDescriptionFits = await evaluate(page, `(() => {
     const description = document.querySelector('[data-item-field="description"]');
@@ -1019,7 +1025,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     document.querySelector('#printButton').click();
     return JSON.stringify({ prints: window.__prints, total: document.querySelector('#editorTotal').textContent, invalid: price.getAttribute('aria-invalid') });
   })()`));
-  assert.deepEqual(overflowBlocked, { prints: 0, total: "Unavailable", invalid: "true" });
+  assert.deepEqual(overflowBlocked, { prints: 0, total: "$0.00", invalid: "true" });
 
   const printCount = await evaluate(page, `(async () => {
     window.__prints = 0; window.__printedTitle = ''; window.print = () => { window.__prints += 1; window.__printedTitle = document.title; };
@@ -1680,12 +1686,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v39'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v41'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,
@@ -1707,7 +1713,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   let activation;
   handlers.activate({ waitUntil: (promise) => { activation = promise; } });
   await activation;
-  assert.deepEqual(deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38"]);
+  assert.deepEqual(deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40"]);
 
   if (!await evaluate(page, "Boolean(navigator.serviceWorker.controller)")) {
     await page.send("Page.reload", { ignoreCache: true });

@@ -1242,23 +1242,24 @@ function invoiceTotal() {
 
 function invoiceTotalFor(invoice) {
   return invoice.items.reduce((total, item) => {
+    if (!Number.isFinite(total)) return total;
+    if (item.quantity === "" || item.price === "") return total;
     const quantity = Number(item.quantity);
     const price = Number(item.price);
-    const valid = item.quantity !== ""
-      && item.price !== ""
-      && Number.isInteger(quantity)
+    const valid = Number.isInteger(quantity)
       && quantity >= 1
       && quantity <= MAX_QUANTITY
       && Number.isFinite(price)
       && price >= MIN_PRICE
       && price <= MAX_PRICE;
-    return valid && Number.isFinite(total) ? total + quantity * price : Number.NaN;
+    return valid ? total + quantity * price : Number.NaN;
   }, 0);
 }
 
 function formatHistoryAmount(value) {
-  if (!Number.isFinite(Number(value))) return "Unavailable";
-  return new Intl.NumberFormat("en-SG", { style: "currency", currency: "SGD" }).format(value);
+  const numeric = Number(value);
+  return new Intl.NumberFormat("en-SG", { style: "currency", currency: "SGD" })
+    .format(Number.isFinite(numeric) ? numeric : 0);
 }
 
 function cloneInvoice(invoice) {
@@ -1814,8 +1815,9 @@ function renderPreview() {
   });
 
   const total = invoiceTotal();
-  setText("#previewTotal", Number.isFinite(total) ? formatAmount(total) : "-");
-  setText("#editorTotal", Number.isFinite(total) ? `$${formatAmount(total)}` : "Unavailable");
+  const displayedTotal = Number.isFinite(total) ? total : 0;
+  setText("#previewTotal", formatAmount(displayedTotal));
+  setText("#editorTotal", `$${formatAmount(displayedTotal)}`);
 }
 
 function handleFieldInput(event) {
