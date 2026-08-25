@@ -739,8 +739,14 @@ h1 {
 
 .field-stack {
   display: grid;
+  min-width: 0;
   gap: 7px;
   margin-top: 13px;
+}
+
+input[type="date"] {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .field-stack label {

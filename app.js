@@ -141,7 +141,6 @@ let authBusy = false;
 let pendingAuthEmailRequest = "";
 let pendingAuthEmailRequestUntil = 0;
 let authEmailRequestsBlockedUntil = 0;
-let printPreviousTitle;
 let editorMode = "new";
 let waitingServiceWorker;
 let reloadingForServiceWorker = false;
@@ -2224,6 +2223,40 @@ async function createPdfExportSheet() {
   return exportSheet;
 }
 
+async function createInvoicePdfWorker() {
+  await loadPdfLibrary();
+  const pdfBaseName = safePdfFileName(state.pdfFileName, state.invoiceNumber);
+  const pdfFileName = `${pdfBaseName}.pdf`;
+  const exportSheet = await createPdfExportSheet();
+  const worker = window
+    .html2pdf()
+    .set({
+      margin: 0,
+      filename: pdfFileName,
+      image: { type: "jpeg", quality: 0.98 },
+      html2canvas: { backgroundColor: "#ffffff", scale: 2, useCORS: true },
+      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+    })
+    .from(exportSheet)
+    .toPdf()
+    .get("pdf")
+    .then((pdf) => {
+      try {
+        addSearchablePdfText(pdf);
+      } catch {
+        // Keep the visual PDF available if an older PDF engine does not
+        // support invisible searchable text.
+      }
+      pdf.setProperties({
+        title: pdfBaseName,
+        subject: `Invoice ${state.invoiceNumber}`,
+        author: "Eng Hoon Residences",
+        creator: "Eng Hoon Residences",
+      });
+    });
+  return { worker, pdfBaseName, pdfFileName };
+}
+
 async function downloadInvoicePdf() {
   if (!invoiceIsReady("saving")) {
     dismissOutputDialog();
@@ -2232,38 +2265,8 @@ async function downloadInvoicePdf() {
 
   setOutputBusy(true);
   try {
-    await loadPdfLibrary();
-    const pdfBaseName = safePdfFileName(state.pdfFileName, state.invoiceNumber);
-    const pdfFileName = `${pdfBaseName}.pdf`;
-    const exportSheet = await createPdfExportSheet();
-    const worker = window
-      .html2pdf()
-      .set({
-        margin: 0,
-        filename: pdfFileName,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: { backgroundColor: "#ffffff", scale: 2, useCORS: true },
-        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-      })
-      .from(exportSheet)
-      .toPdf();
-    await worker
-      .get("pdf")
-      .then((pdf) => {
-        try {
-          addSearchablePdfText(pdf);
-        } catch {
-          // Keep the visual PDF available if an older PDF engine does not
-          // support invisible searchable text.
-        }
-        pdf.setProperties({
-          title: pdfBaseName,
-          subject: `Invoice ${state.invoiceNumber}`,
-          author: "Eng Hoon Residences",
-          creator: "Eng Hoon Residences",
-        });
-      })
-      .save();
+    const { worker, pdfFileName } = await createInvoicePdfWorker();
+    await worker.save();
     dismissOutputDialog();
     showToast(`${pdfFileName} saved.`);
   } catch (error) {
@@ -2276,21 +2279,53 @@ async function downloadInvoicePdf() {
   }
 }
 
-function printInvoice() {
+async function printInvoice() {
   if (!invoiceIsReady("printing")) {
     dismissOutputDialog();
     return;
   }
-  dismissOutputDialog();
-  if (printPreviousTitle === undefined) printPreviousTitle = document.title;
-  document.title = `${safePdfFileName(state.pdfFileName, state.invoiceNumber)}.pdf`;
-  window.print();
-}
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    showToast("Allow pop-ups for this site to print, or use Save as PDF.");
+    return;
+  }
 
-function restorePrintTitle() {
-  if (printPreviousTitle === undefined) return;
-  document.title = printPreviousTitle;
-  printPreviousTitle = undefined;
+  try {
+    printWindow.document.title = "Preparing invoice...";
+    printWindow.document.body.textContent = "Preparing a clean invoice for printing...";
+    printWindow.document.body.style.cssText = "font: 16px system-ui; margin: 32px; color: #222;";
+  } catch {
+    // The PDF can still open if a browser does not expose the temporary tab.
+  }
+
+  setOutputBusy(true);
+  try {
+    const { worker, pdfFileName } = await createInvoicePdfWorker();
+    const pdfBlob = await worker.outputPdf("blob");
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+    printWindow.addEventListener("load", () => {
+      window.setTimeout(() => {
+        try {
+          printWindow.focus();
+          printWindow.print();
+        } catch {
+          // The clean PDF stays open so the browser's print button remains available.
+        }
+      }, 250);
+    }, { once: true });
+    printWindow.location.replace(pdfUrl);
+    window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 300000);
+    dismissOutputDialog();
+    showToast(`${pdfFileName} opened for printing.`);
+  } catch {
+    printWindow.close();
+    const message = typeof window.html2pdf === "function"
+      ? "The print copy could not be created. Try Save as PDF."
+      : "Printing is unavailable. Check your connection and try again.";
+    showToast(message);
+  } finally {
+    setOutputBusy(false);
+  }
 }
 
 function showToast(message) {
@@ -2582,7 +2617,6 @@ window.addEventListener("beforeprint", () => {
   invoiceSheet.style.transform = "none";
 });
 window.addEventListener("afterprint", () => {
-  restorePrintTitle();
   updatePreviewScale();
 });
 

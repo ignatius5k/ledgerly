@@ -624,6 +624,25 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(narrowHeader, { fits: true, height: 66, subtitleVisible: false, desktopSaveVisible: false, mobileSaveVisible: true });
 
   await page.send("Emulation.setDeviceMetricsOverride", { width: 320, height: 640, deviceScaleFactor: 1, mobile: true });
+  const mobileDateFields = JSON.parse(await evaluate(page, `(() => {
+    const section = document.querySelector('#invoiceDate').closest('.form-section').getBoundingClientRect();
+    const fields = ['invoiceDate', 'dueDate'].map(id => {
+      const input = document.querySelector('#' + id);
+      const rect = input.getBoundingClientRect();
+      return {
+        minWidth: getComputedStyle(input).minWidth,
+        insideSection: rect.left >= section.left && rect.right <= section.right
+      };
+    });
+    return JSON.stringify({ fields, documentFits: document.documentElement.scrollWidth <= innerWidth });
+  })()`));
+  assert.deepEqual(mobileDateFields, {
+    fields: [
+      { minWidth: "0px", insideSection: true },
+      { minWidth: "0px", insideSection: true },
+    ],
+    documentFits: true,
+  });
   const previewClickStart = JSON.parse(await evaluate(page, `(() => {
     const button = document.querySelector('#mobileViewPreviewButton');
     button.scrollIntoView({ block: 'center' });
@@ -1028,7 +1047,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(overflowBlocked, { prints: 0, total: "$0.00", invalid: "true" });
 
   const printCount = await evaluate(page, `(async () => {
-    window.__prints = 0; window.__printedTitle = ''; window.print = () => { window.__prints += 1; window.__printedTitle = document.title; };
+    window.__prints = 0; window.__printedTitle = '';
     const titleBeforePrint = document.title;
     const values = { invoiceNumber: 'INV-1', pdfFileName: 'August / Brew Invoice.pdf', invoiceDate: '2026-08-20', dueDate: '2026-08-13', billTo: 'Customer' };
     for (const [id, value] of Object.entries(values)) { const input = document.querySelector('#' + id); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); }
@@ -1055,8 +1074,49 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
       fileName: document.querySelector('#outputFileName').textContent,
       printsBeforeChoice: window.__prints
     };
+    const originalOpen = window.open;
+    const capturedPrintPdf = {};
+    const printTarget = {
+      closed: false,
+      document: { title: '', body: { textContent: '', style: { cssText: '' } } },
+      location: {
+        replace(url) {
+          capturedPrintPdf.url = url;
+          setTimeout(() => printTarget.loadHandler?.(), 0);
+        }
+      },
+      addEventListener(type, handler) { if (type === 'load') this.loadHandler = handler; },
+      focus() {},
+      print() {
+        window.__prints += 1;
+        window.__printedTitle = capturedPrintPdf.title + '.pdf';
+      },
+      close() { this.closed = true; }
+    };
+    const printWorker = {
+      set() { return this; },
+      from() { return this; },
+      toPdf() { return this; },
+      get() { return this; },
+      then(callback) {
+        callback({
+          setFont() {},
+          setFontSize() {},
+          setLanguage() {},
+          text() {},
+          setProperties(properties) { capturedPrintPdf.title = properties.title; }
+        });
+        return this;
+      },
+      outputPdf() { return Promise.resolve(new Blob(['%PDF-print-copy'], { type: 'application/pdf' })); }
+    };
+    window.open = () => printTarget;
+    window.html2pdf = () => printWorker;
     document.querySelector('#printNowButton').click();
-    const titleDuringPrint = document.title;
+    while (window.__prints < 1) await new Promise(resolve => setTimeout(resolve, 10));
+    const titleDuringPrint = window.__printedTitle;
+    window.open = originalOpen;
+    delete window.html2pdf;
     window.dispatchEvent(new Event('afterprint'));
     return JSON.stringify({
       rejected,
@@ -1686,12 +1746,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v41'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v43'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,
@@ -1713,7 +1773,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   let activation;
   handlers.activate({ waitUntil: (promise) => { activation = promise; } });
   await activation;
-  assert.deepEqual(deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40"]);
+  assert.deepEqual(deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42"]);
 
   if (!await evaluate(page, "Boolean(navigator.serviceWorker.controller)")) {
     await page.send("Page.reload", { ignoreCache: true });
