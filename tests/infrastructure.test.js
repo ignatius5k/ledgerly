@@ -19,6 +19,31 @@ function assertBackupContentsEqual(actual, expected, message) {
   assert.equal(JSON.stringify(actualContents), JSON.stringify(expectedContents), message);
 }
 
+function pngDimensions(buffer) {
+  assert.equal(buffer.subarray(1, 4).toString("ascii"), "PNG");
+  return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+}
+
+function jpegDimensions(buffer) {
+  assert.equal(buffer.readUInt16BE(0), 0xffd8);
+  let offset = 2;
+  while (offset < buffer.length) {
+    if (buffer[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+    const marker = buffer[offset + 1];
+    offset += 2;
+    if (marker === 0xd8 || marker === 0xd9) continue;
+    const segmentLength = buffer.readUInt16BE(offset);
+    if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
+      return { width: buffer.readUInt16BE(offset + 5), height: buffer.readUInt16BE(offset + 3) };
+    }
+    offset += segmentLength;
+  }
+  throw new Error("JPEG dimensions were not found.");
+}
+
 async function loadWorker(initialFetch = async () => new Response("network")) {
   const source = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
@@ -116,6 +141,19 @@ function dispatchFetch(handler, request) {
   };
 }
 
+test("logo assets retain their established dimensions", async () => {
+  const [logoPng, logoJpeg, icon192, icon512] = await Promise.all([
+    readFile(join(ROOT, "eng-hoon-residences-logo.png")),
+    readFile(join(ROOT, "eng-hoon-residences-logo.jpeg")),
+    readFile(join(ROOT, "icon-192.png")),
+    readFile(join(ROOT, "icon-512.png")),
+  ]);
+  assert.deepEqual(pngDimensions(logoPng), { width: 600, height: 530 });
+  assert.deepEqual(jpegDimensions(logoJpeg), { width: 256, height: 260 });
+  assert.deepEqual(pngDimensions(icon192), { width: 192, height: 192 });
+  assert.deepEqual(pngDimensions(icon512), { width: 512, height: 512 });
+});
+
 test("service-worker updates wait for an explicit activation request", async () => {
   const worker = await loadWorker();
   let installation;
@@ -123,6 +161,9 @@ test("service-worker updates wait for an explicit activation request", async () 
   await installation;
   assert.equal(worker.skipWaitingCalls, 0);
   assert.ok(worker.cacheAdditions.includes("./index.html"));
+  assert.ok(worker.cacheAdditions.includes("./eng-hoon-residences-logo.png?v=44"));
+  assert.ok(worker.cacheAdditions.includes("./icon-192.png?v=44"));
+  assert.ok(worker.cacheAdditions.includes("./icon-512.png?v=44"));
   assert.equal(worker.cacheAdditions.includes("./vendor/html2pdf.bundle.min.js?v=32"), false);
 
   worker.handlers.message({ data: { type: "SKIP_WAITING" } });
@@ -149,12 +190,13 @@ test("activation removes only previous Invoice Studio caches", async () => {
   worker.stores.set("invoice-studio-v40", new Map());
   worker.stores.set("invoice-studio-v41", new Map());
   worker.stores.set("invoice-studio-v42", new Map());
+  worker.stores.set("invoice-studio-v43", new Map());
   worker.stores.set("unrelated-cache", new Map());
   let activation;
   worker.handlers.activate({ waitUntil(value) { activation = value; } });
   await activation;
-  assert.deepEqual(worker.deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42"]);
-  assert.equal(await (await worker.stores.get("invoice-studio-v43").get(runtimeUrl)).text(), "warmed PDF runtime");
+  assert.deepEqual(worker.deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43"]);
+  assert.equal(await (await worker.stores.get("invoice-studio-v44").get(runtimeUrl)).text(), "warmed PDF runtime");
   assert.equal(worker.clientsClaimed, 1);
   assert.equal(worker.stores.has("unrelated-cache"), true);
 });
@@ -172,7 +214,7 @@ test("query-string navigations are network-only and never cached", async () => {
 });
 
 test("only managed shell and runtime requests are cached and used offline", async () => {
-  const shellUrl = `${SCOPE}app.js?v=43`;
+  const shellUrl = `${SCOPE}app.js?v=44`;
   const worker = await loadWorker(async () => new Response("fresh shell"));
   const onlineEvent = dispatchFetch(worker.handlers.fetch, {
     method: "GET",
@@ -181,7 +223,7 @@ test("only managed shell and runtime requests are cached and used offline", asyn
   });
   assert.equal(await (await onlineEvent.response()).text(), "fresh shell");
   await Promise.all(onlineEvent.lifetime);
-  assert.deepEqual(worker.cachePuts, [{ cacheName: "invoice-studio-v43", key: shellUrl }]);
+  assert.deepEqual(worker.cachePuts, [{ cacheName: "invoice-studio-v44", key: shellUrl }]);
 
   const runtimeUrl = `${SCOPE}vendor/html2pdf.bundle.min.js?v=32`;
   const runtimeEvent = dispatchFetch(worker.handlers.fetch, {
@@ -192,8 +234,8 @@ test("only managed shell and runtime requests are cached and used offline", asyn
   assert.equal(await (await runtimeEvent.response()).text(), "fresh shell");
   await Promise.all(runtimeEvent.lifetime);
   assert.deepEqual(worker.cachePuts, [
-    { cacheName: "invoice-studio-v43", key: shellUrl },
-    { cacheName: "invoice-studio-v43", key: runtimeUrl },
+    { cacheName: "invoice-studio-v44", key: shellUrl },
+    { cacheName: "invoice-studio-v44", key: runtimeUrl },
   ]);
 
   worker.setFetch(async () => { throw new Error("offline"); });
