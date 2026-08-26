@@ -372,7 +372,7 @@ function showSignedOutPage() {
   passwordRecoveryForm.hidden = true;
   authPage.setAttribute("aria-labelledby", "authTitle");
   document.body.dataset.page = "auth";
-  document.title = "Sign in | Invoice Studio";
+  document.title = "Sign in | Ledgerly";
   setAuthMessage();
   authEmail.focus({ preventScroll: true });
 }
@@ -389,7 +389,7 @@ function showConfigurationPage() {
   passwordRecoveryForm.hidden = true;
   authPage.setAttribute("aria-labelledby", "configurationTitle");
   document.body.dataset.page = "auth";
-  document.title = "Connect account | Invoice Studio";
+  document.title = "Connect account | Ledgerly";
   setAuthMessage();
 }
 
@@ -402,7 +402,7 @@ function showPasswordRecoveryPage() {
   passwordRecoveryForm.hidden = false;
   authPage.setAttribute("aria-labelledby", "recoveryTitle");
   document.body.dataset.page = "auth";
-  document.title = "Set a new password | Invoice Studio";
+  document.title = "Set a new password | Ledgerly";
   setAuthMessage();
   recoveryPassword.focus({ preventScroll: true });
 }
@@ -442,7 +442,7 @@ function localBackupData() {
       : {
         version: 1,
         exportedAt: new Date().toISOString(),
-        source: "Eng Hoon Residences Invoice Studio browser storage",
+        source: "Eng Hoon Residences Ledgerly browser storage",
         history: legacyExportValue(HISTORY_KEY),
         draft: legacyExportValue(STORAGE_KEY),
         sequence: legacyExportValue(SEQUENCE_KEY),
@@ -452,7 +452,7 @@ function localBackupData() {
     backup = {
       version: 1,
       exportedAt: new Date().toISOString(),
-      source: "Eng Hoon Residences Invoice Studio open-tab recovery",
+      source: "Eng Hoon Residences Ledgerly open-tab recovery",
       history: { unavailable: true, message: error.message },
       draft: null,
       draftRevision: null,
@@ -473,7 +473,7 @@ function downloadLocalBackup(options = {}) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `invoice-studio-local-backup-${isoDate(new Date())}.json`;
+  link.download = `ledgerly-local-backup-${isoDate(new Date())}.json`;
   document.body.append(link);
   link.click();
   link.remove();
@@ -529,16 +529,16 @@ function showStorageRecovery(error) {
   invoiceListButton.hidden = true;
   newInvoiceButton.hidden = true;
   printButton.hidden = true;
-  storageRecoveryMessage.textContent = error?.message || "Invoice Studio could not access this browser's local storage.";
+  storageRecoveryMessage.textContent = error?.message || "Ledgerly could not access this browser's local storage.";
   storageRecoveryDetail.textContent = error?.storageKey
     ? `Affected storage area: ${error.storageKey}`
     : "Your existing local data has not been intentionally changed.";
-  document.title = "Local data recovery | Invoice Studio";
+  document.title = "Local data recovery | Ledgerly";
   requestAnimationFrame(() => document.querySelector("#storageRecoveryTitle")?.focus({ preventScroll: true }));
 }
 
 async function clearRecoveryData() {
-  if (!window.confirm("Permanently clear Invoice Studio invoices and drafts from this browser? Download a recovery backup first.")) return;
+  if (!window.confirm("Permanently clear Ledgerly invoices and drafts from this browser? Download a recovery backup first.")) return;
   try {
     if (typeof backend.clearLocalData !== "function") throw new Error("Local data clearing is unavailable in this build.");
     backend.clearLocalData();
@@ -1471,7 +1471,7 @@ function showEditorPage(mode = "new", focusEditor = true) {
   if (mode === "new" || mode === "duplicate") newInvoiceButton.setAttribute("aria-current", "page");
   else newInvoiceButton.removeAttribute("aria-current");
   editorTitle.textContent = mode === "edit" ? "Edit invoice" : mode === "duplicate" ? "Review duplicated invoice" : "Create an invoice";
-  document.title = state.invoiceNumber ? `${state.invoiceNumber} | Invoice Studio` : "Invoice Studio";
+  document.title = state.invoiceNumber ? `${state.invoiceNumber} | Ledgerly` : "Ledgerly";
   window.scrollTo({ top: 0 });
   requestAnimationFrame(() => {
     updatePreviewScale();
@@ -1491,7 +1491,7 @@ function showInvoiceList(focusHeading = true) {
   printButton.hidden = true;
   invoiceListButton.setAttribute("aria-current", "page");
   newInvoiceButton.removeAttribute("aria-current");
-  document.title = "Invoices | Invoice Studio";
+  document.title = "Invoices | Ledgerly";
   renderInvoiceHistory();
   window.scrollTo({ top: 0 });
   if (focusHeading) document.querySelector("#invoiceListTitle")?.focus({ preventScroll: true });
@@ -2537,7 +2537,7 @@ window.addEventListener("beforeinstallprompt", (event) => {
 window.addEventListener("appinstalled", () => {
   installButton.hidden = true;
   installPrompt = undefined;
-  showToast("Invoice Studio installed.");
+  showToast("Ledgerly installed.");
 });
 
 installButton.addEventListener("click", async () => {

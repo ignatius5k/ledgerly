@@ -181,7 +181,6 @@ textarea[aria-invalid="true"] {
 }
 
 .brand-name,
-.brand-subtitle,
 .save-status,
 .preview-toolbar p,
 .field-help,
@@ -196,12 +195,6 @@ textarea[aria-invalid="true"] {
   font-size: 17px;
   font-weight: 700;
   letter-spacing: -0.02em;
-}
-
-.brand-subtitle {
-  margin-top: 1px;
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .header-actions {
@@ -1477,7 +1470,6 @@ noscript {
     padding: calc(10px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 10px calc(14px + env(safe-area-inset-left));
   }
 
-  .brand-subtitle,
   .account-email,
   #newInvoiceButton,
   #printButton {

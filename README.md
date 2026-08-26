@@ -1,4 +1,4 @@
-# Invoice Studio
+# Ledgerly
 
 An installable, device-local invoicing app based on the supplied Eng Hoon Residences invoice. It creates, edits, duplicates, stores, downloads, and prints A4 invoices without requiring an account or remote data service.
 

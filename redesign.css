@@ -109,10 +109,6 @@
     font-size: 15px;
   }
 
-  .brand-subtitle {
-    font-size: 10px;
-  }
-
   .header-actions {
     display: flex;
     width: 100%;
@@ -202,7 +198,7 @@
 
   .header-actions > #printButton {
     position: fixed;
-    top: 22px;
+    top: 16px;
     right: 28px;
     z-index: 18;
     width: auto;
@@ -704,10 +700,6 @@
 
   .brand-name {
     font-size: 14px;
-  }
-
-  .brand-subtitle {
-    display: none;
   }
 
   .header-actions > .button {

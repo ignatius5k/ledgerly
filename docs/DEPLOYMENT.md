@@ -1,6 +1,6 @@
 # Deployment
 
-Invoice Studio is a static progressive web app. Run `npm run build` and publish the generated `dist/` directory from one stable HTTPS origin.
+Ledgerly is a static progressive web app. Run `npm run build` and publish the generated `dist/` directory from one stable HTTPS origin.
 
 ## Requirements
 

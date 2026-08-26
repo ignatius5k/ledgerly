@@ -14,6 +14,7 @@ const STATIC_FILES = [
   "outbox.js",
   "sw.js",
   "manifest.webmanifest",
+  "ledgerly-mark.png",
   "eng-hoon-residences-logo.png",
   "icon-192.png",
   "icon-512.png",

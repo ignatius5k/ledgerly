@@ -1,6 +1,6 @@
 # Operations
 
-Invoice Studio currently stores invoice records only in each browser profile. There is no remote replica or cross-device recovery service.
+Ledgerly currently stores invoice records only in each browser profile. There is no remote replica or cross-device recovery service.
 
 ## Data precautions
 

@@ -84,7 +84,7 @@
     try {
       return JSON.parse(raw);
     } catch {
-      throw storageError("Some saved Invoice Studio data cannot be read. Download a recovery backup before clearing it.", "LOCAL_DATA_CORRUPT", key);
+      throw storageError("Some saved Ledgerly data cannot be read. Download a recovery backup before clearing it.", "LOCAL_DATA_CORRUPT", key);
     }
   }
 
@@ -324,7 +324,7 @@
     return {
       version: 1,
       exportedAt: new Date().toISOString(),
-      source: "Eng Hoon Residences Invoice Studio browser storage",
+      source: "Eng Hoon Residences Ledgerly browser storage",
       history: exportValue(HISTORY_KEY),
       draft: exportValue(DRAFT_KEY),
       draftRevision: exportValue(DRAFT_REVISION_KEY),
@@ -333,7 +333,7 @@
   }
 
   function validateBackup(backup) {
-    if (!backup || typeof backup !== "object") throw new Error("Choose an Invoice Studio backup file.");
+    if (!backup || typeof backup !== "object") throw new Error("Choose a Ledgerly backup file.");
     const history = backup.history ?? [];
     const draft = backup.draft ?? null;
     if (!Array.isArray(history) || history.some((record) => !validHistoryRecord(record))) {

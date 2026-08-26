@@ -174,7 +174,11 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     accountLabel: document.querySelector('#accountEmail').textContent,
     signOutHidden: document.querySelector('#signOutButton').hidden,
     syncStatus: document.querySelector('#syncStatus').textContent,
-    storageNote: document.querySelector('.history-storage-note').textContent
+    storageNote: document.querySelector('.history-storage-note').textContent,
+    brandName: document.querySelector('.brand-name').textContent,
+    headerLogo: document.querySelector('.brand-lockup img').getAttribute('src'),
+    invoiceLogo: document.querySelector('.invoice-logo').getAttribute('src'),
+    title: document.title
   })`));
   assert.deepEqual(guestState, {
     guestMode: true,
@@ -184,6 +188,10 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     signOutHidden: true,
     syncStatus: "Saved locally",
     storageNote: "Invoices and drafts exist only in this browser profile. Clearing site data, using private browsing, or changing devices can remove access. Download a backup regularly.",
+    brandName: "Ledgerly",
+    headerLogo: "./ledgerly-mark.png?v=47",
+    invoiceLogo: "./eng-hoon-residences-logo.png?v=47",
+    title: "Invoices | Ledgerly",
   });
 
   await evaluate(page, "localStorage.setItem('invoice-studio-history-v1', '{broken-json'); location.reload(); true");
@@ -606,22 +614,38 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     }
   }
 
+  const desktopToolbarAlignment = JSON.parse(await evaluate(page, `(() => {
+    const zoom = document.querySelector('.preview-zoom-controls').getBoundingClientRect();
+    const save = document.querySelector('#printButton').getBoundingClientRect();
+    return JSON.stringify({
+      zoomCenter: zoom.top + zoom.height / 2,
+      saveCenter: save.top + save.height / 2
+    });
+  })()`));
+  assert.ok(
+    Math.abs(desktopToolbarAlignment.zoomCenter - desktopToolbarAlignment.saveCenter) < 1,
+    `desktop toolbar centers must align: ${JSON.stringify(desktopToolbarAlignment)}`,
+  );
+
   await page.send("Emulation.setDeviceMetricsOverride", { width: 701, height: 900, deviceScaleFactor: 1, mobile: false });
   const narrowHeader = JSON.parse(await evaluate(page, `(() => {
     const install = document.querySelector('#installButton');
     install.hidden = false;
     const header = document.querySelector('.app-header');
+    const mark = document.querySelector('.brand-lockup img').getBoundingClientRect();
+    const name = document.querySelector('.brand-name').getBoundingClientRect();
     const result = {
       fits: header.scrollWidth <= header.clientWidth,
       height: header.getBoundingClientRect().height,
-      subtitleVisible: document.querySelector('.brand-subtitle').getClientRects().length > 0,
+      subtitlePresent: Boolean(document.querySelector('.brand-subtitle')),
+      wordCentered: Math.abs((mark.top + mark.height / 2) - (name.top + name.height / 2)) < 1,
       desktopSaveVisible: document.querySelector('#printButton').getClientRects().length > 0,
       mobileSaveVisible: document.querySelector('#mobilePrintButton').getClientRects().length > 0
     };
     install.hidden = true;
     return JSON.stringify(result);
   })()`));
-  assert.deepEqual(narrowHeader, { fits: true, height: 66, subtitleVisible: false, desktopSaveVisible: false, mobileSaveVisible: true });
+  assert.deepEqual(narrowHeader, { fits: true, height: 66, subtitlePresent: false, wordCentered: true, desktopSaveVisible: false, mobileSaveVisible: true });
 
   await page.send("Emulation.setDeviceMetricsOverride", { width: 320, height: 640, deviceScaleFactor: 1, mobile: true });
   const mobileDateFields = JSON.parse(await evaluate(page, `(() => {
@@ -1746,12 +1770,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v44'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v47'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,
@@ -1773,7 +1797,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   let activation;
   handlers.activate({ waitUntil: (promise) => { activation = promise; } });
   await activation;
-  assert.deepEqual(deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43"]);
+  assert.deepEqual(deletedCaches, ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46"]);
 
   if (!await evaluate(page, "Boolean(navigator.serviceWorker.controller)")) {
     await page.send("Page.reload", { ignoreCache: true });
