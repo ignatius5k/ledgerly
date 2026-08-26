@@ -9,6 +9,16 @@ const vm = require("node:vm");
 const ROOT = join(__dirname, "..");
 const SCOPE = "https://example.test/invoice-studio/";
 
+function assertBackupContentsEqual(actual, expected, message) {
+  assert.match(actual.exportedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  assert.match(expected.exportedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  const actualContents = { ...actual };
+  const expectedContents = { ...expected };
+  delete actualContents.exportedAt;
+  delete expectedContents.exportedAt;
+  assert.equal(JSON.stringify(actualContents), JSON.stringify(expectedContents), message);
+}
+
 async function loadWorker(initialFetch = async () => new Response("network")) {
   const source = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
@@ -320,11 +330,11 @@ test("device-local backend persists revision-safe invoices and drafts", async ()
     Promise.resolve().then(() => backend.restoreLocalData(replacementBackup)),
     (error) => error.code === "LOCAL_STORAGE_UNAVAILABLE",
   );
-  assert.equal(JSON.stringify(backend.exportLocalData()), JSON.stringify(protectedBackup), "a failed restore must expose the complete earlier dataset");
+  assertBackupContentsEqual(backend.exportLocalData(), protectedBackup, "a failed restore must expose the complete earlier dataset");
   restoreFailureMode = false;
   await backend.getSession();
   assert.equal(values.has("invoice-studio-restore-journal-v1"), false);
-  assert.equal(JSON.stringify(backend.exportLocalData()), JSON.stringify(protectedBackup));
+  assertBackupContentsEqual(backend.exportLocalData(), protectedBackup);
 
   values.set("invoice-studio-history-v1", "{broken-json");
   await assert.rejects(
