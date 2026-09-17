@@ -322,6 +322,66 @@ test("saving an invoice uploads its real PDF, reports upload failure honestly, a
   assert.deepEqual(exceptions, []);
 });
 
+test("an already stored PDF is the exact copy used by Save as PDF and invoice history", { timeout: 90000 }, async (context) => {
+  const { read, until, socket, profile, exceptions } = await launchFirebaseBrowser(context);
+  const browser = await connectCdp(socket);
+  context.after(() => browser.close());
+  await browser.send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: profile });
+  const email = `pdf-existing-${Date.now()}@example.test`;
+  await read(`document.querySelector('#authEmail').value=${JSON.stringify(email)}; document.querySelector('#authPassword').value='Browser-test-123!'; document.querySelector('#createAccountButton').click(); true`);
+  await until("!document.querySelector('#invoiceListPage').hidden");
+  await read(`(() => {
+    const upload = window.invoiceBackend.saveInvoicePdf;
+    window.invoiceBackend.saveInvoicePdf = async (uid, record, blob) => {
+      // Simulate another renderer saving this revision first. A trailing PDF
+      // comment preserves its appearance while making its bytes distinct.
+      const original = new Blob([blob, '\\n% Previously stored copy\\n'], {type:'application/pdf'});
+      try {
+        await upload(uid, record, original);
+        const result = await upload(uid, record, blob);
+        window.reusedStoredPdf = result.alreadySaved;
+        return result;
+      } catch (error) {
+        window.existingPdfError = {code:error.code,message:error.message};
+        throw error;
+      }
+    };
+    document.querySelector('#historyNewInvoiceButton').click();
+  })()`);
+  await until("!document.querySelector('#editorPage').hidden");
+  await read(`(() => {
+    const set = (selector, value) => { const el=document.querySelector(selector); el.value=value; el.dispatchEvent(new Event('input',{bubbles:true})); };
+    set('#invoiceNumber','PDF-EXISTING-COPY');
+    set('#billTo','STORED PDF EQUALITY TEST');
+    set('[data-item-field="description"]','Previously saved invoice PDF');
+    set('[data-item-field="price"]','1');
+    document.querySelector('#printButton').click();
+  })()`);
+  await until("['saved','error'].includes(document.querySelector('#cloudPdfStatus').dataset.state) && !document.querySelector('#savePdfButton').disabled");
+  assert.equal(await read("document.querySelector('#cloudPdfStatus').dataset.state"), "saved", JSON.stringify(await read("window.existingPdfError")));
+  assert.equal(await read("window.reusedStoredPdf"), true);
+  const cloud = await read(`(async () => {
+    const uid=(await window.invoiceBackend.getSession()).user.id;
+    const {records}=await window.invoiceBackend.listInvoices(uid);
+    const blob=await window.invoiceBackend.loadInvoicePdf(uid,records[0]);
+    const digest=await crypto.subtle.digest('SHA-256',await blob.arrayBuffer());
+    return {size:blob.size,sha256:Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('')};
+  })()`);
+  const filePath = join(profile, "PDF-EXISTING-COPY.pdf");
+  await read("document.querySelector('#savePdfButton').click(); true");
+  await waitFor(async () => { try { return (await stat(filePath)).size > 1000; } catch { return false; } }, 20000);
+  const downloaded = await readFile(filePath);
+  assert.equal(createHash("sha256").update(downloaded).digest("hex"), cloud.sha256, "Save as PDF must use the stored file when Firebase reuses an existing revision");
+  assert.equal(downloaded.length, cloud.size);
+  await rm(filePath);
+  await read("location.reload(); true");
+  await until("!document.querySelector('#invoiceListPage').hidden && Boolean(document.querySelector('[data-download-invoice-pdf]'))");
+  await read("document.querySelector('[data-download-invoice-pdf]').click(); true");
+  await waitFor(async () => { try { return (await stat(filePath)).size === cloud.size; } catch { return false; } }, 20000);
+  assert.deepEqual(await readFile(filePath), downloaded, "history and immediate downloads must be byte-identical");
+  assert.deepEqual(exceptions, []);
+});
+
 test("a new draft edit following an overlapping successful sync uses the new revision", { timeout: 45000 }, async (context) => {
   const { read, until, exceptions } = await launchFirebaseBrowser(context);
   const email = `draft-race-${Date.now()}@example.test`;

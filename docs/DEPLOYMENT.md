@@ -74,7 +74,7 @@ gcloud storage buckets update gs://ledgerly-e0c95.firebasestorage.app --cors-fil
 
 The included origins cover this project's Firebase hosts, GitHub Pages hostname, and the documented local previews. CORS permits browser downloads; it does not grant access to a file. Storage rules still require the owning Firebase UID. The app uses authenticated `getBlob`, never a public download URL.
 
-PDFs are at `users/{uid}/invoices/{invoiceId}/revisions/{revision}.pdf`. Uploads require the current committed invoice revision, PDF content type, and a file no larger than 10 MiB. Existing revision files cannot be overwritten. Retries reuse an existing matching file; an invoice fingerprint prevents reusing a PDF from a deleted/recreated record with different contents. The output dialog reports invoice-data success separately from PDF-upload success.
+PDFs are at `users/{uid}/invoices/{invoiceId}/revisions/{revision}.pdf`. Uploads require the current committed invoice revision, PDF content type, and a file no larger than 10 MiB. Existing revision files cannot be overwritten. Retries reuse an existing matching file; an invoice fingerprint prevents reusing a PDF from a deleted/recreated record with different contents. When a file is reused, the app retrieves it for immediate download and printing so those bytes match history downloads, including PDF metadata. The output dialog reports invoice-data success separately from PDF-upload success.
 
 Run all three emulators in one CLI process: cross-service Storage rules cannot find Firestore in a separate emulator process. `npm run test:firebase` does this automatically.
 

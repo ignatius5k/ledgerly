@@ -2344,8 +2344,17 @@ async function saveOutputPdfToAccount() {
   try {
     const blob = await outputPdfBlob(context);
     if (!isCurrentOutputPdf(context)) return;
-    await backend.saveInvoicePdf(context.uid, { id: context.id, revision: context.revision }, blob);
+    const record = { id: context.id, revision: context.revision };
+    const result = await backend.saveInvoicePdf(context.uid, record, blob);
     if (!isCurrentOutputPdf(context)) return;
+    if (result.alreadySaved) {
+      // A different renderer may have saved this revision first. Reuse the
+      // stored bytes for downloads and print, including PDF metadata.
+      const storedBlob = await backend.loadInvoicePdf(context.uid, record);
+      if (!isCurrentOutputPdf(context)) return;
+      context.blob = storedBlob;
+      context.blobPromise = Promise.resolve(storedBlob);
+    }
     context.saved = true;
     setCloudPdfStatus("PDF saved to your account.", "saved");
   } catch (error) {

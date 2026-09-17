@@ -55,8 +55,18 @@ function startServer(options = {}) {
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
 }
 
-function connectCdp(url) {
+function stopServer(server) {
+  return new Promise((resolve, reject) => {
+    server.close((error) => error && error.code !== "ERR_SERVER_NOT_RUNNING" ? reject(error) : resolve());
+    // Offline coverage must remove the origin, including sockets Chrome opened
+    // speculatively or left mid-request. Graceful close waits for those clients.
+    server.closeAllConnections();
+  });
+}
+
+function connectCdp(url, options = {}) {
   const socket = new WebSocket(url);
+  const timeoutMs = options.timeoutMs || 20000;
   let nextId = 0;
   const pending = new Map();
   const listeners = new Map();
@@ -67,27 +77,55 @@ function connectCdp(url) {
       return;
     }
     const callback = pending.get(message.id);
+    if (!callback) return; // A response can arrive after its request deadline.
     pending.delete(message.id);
+    clearTimeout(callback.timer);
     if (message.error) callback.reject(new Error(message.error.message));
     else callback.resolve(message.result);
   });
   return new Promise((resolve, reject) => {
-    socket.addEventListener("error", reject, { once: true });
-    socket.addEventListener("open", () => resolve({
-      close: () => socket.close(),
-      on(method, listener) {
-        const methodListeners = listeners.get(method) || [];
-        methodListeners.push(listener);
-        listeners.set(method, methodListeners);
-      },
-      send(method, params = {}) {
-        const id = ++nextId;
-        socket.send(JSON.stringify({ id, method, params }));
-        return new Promise((resolveCommand, rejectCommand) => {
-          pending.set(id, { resolve: resolveCommand, reject: rejectCommand });
-        });
-      },
-    }), { once: true });
+    const connectionTimer = setTimeout(() => {
+      socket.close();
+      reject(new Error(`CDP connection timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
+    const disconnected = (error) => {
+      clearTimeout(connectionTimer);
+      reject(error);
+      for (const callback of pending.values()) {
+        clearTimeout(callback.timer);
+        callback.reject(error);
+      }
+      pending.clear();
+    };
+    socket.addEventListener("error", () => disconnected(new Error("CDP connection failed.")), { once: true });
+    socket.addEventListener("close", () => disconnected(new Error("CDP connection closed before the browser command completed.")), { once: true });
+    socket.addEventListener("open", () => {
+      clearTimeout(connectionTimer);
+      resolve({
+        close: () => socket.close(),
+        on(method, listener) {
+          const methodListeners = listeners.get(method) || [];
+          methodListeners.push(listener);
+          listeners.set(method, methodListeners);
+        },
+        send(method, params = {}, commandTimeoutMs = timeoutMs) {
+          const id = ++nextId;
+          return new Promise((resolveCommand, rejectCommand) => {
+            const timer = setTimeout(() => {
+              pending.delete(id);
+              rejectCommand(Object.assign(new Error(`CDP ${method} timed out after ${commandTimeoutMs}ms.`), { code: "CDP_TIMEOUT" }));
+            }, commandTimeoutMs);
+            pending.set(id, { resolve: resolveCommand, reject: rejectCommand, timer });
+            try { socket.send(JSON.stringify({ id, method, params })); }
+            catch (error) {
+              clearTimeout(timer);
+              pending.delete(id);
+              rejectCommand(error);
+            }
+          });
+        },
+      });
+    }, { once: true });
   });
 }
 
@@ -102,9 +140,18 @@ async function waitFor(check, timeout = 5000) {
 }
 
 async function evaluate(cdp, expression) {
-  const result = await cdp.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-  if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
-  return result.result.value;
+  try {
+    const result = await cdp.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+    if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
+    return result.result.value;
+  } catch (error) {
+    if (error.code !== "CDP_TIMEOUT") throw error;
+    const state = await cdp.send("Runtime.evaluate", {
+      expression: "JSON.stringify({url:location.href,page:document.body?.dataset.page,content:document.body?.innerText?.slice(0,5000)})",
+      returnByValue: true,
+    }, 2000).then((result) => result.result.value).catch(() => "Browser did not respond to diagnostics.");
+    throw new Error(`${error.message}\nEvaluation:\n${expression.slice(0,5000)}\nPage state:\n${state}`, { cause: error });
+  }
 }
 
 async function findChromePath() {
@@ -119,4 +166,4 @@ async function findChromePath() {
   return undefined;
 }
 
-module.exports = { startServer, connectCdp, waitFor, evaluate, findChromePath };
+module.exports = { startServer, stopServer, connectCdp, waitFor, evaluate, findChromePath };

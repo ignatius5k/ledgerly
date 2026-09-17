@@ -1,5 +1,7 @@
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
+const { once } = require("node:events");
+const { createConnection } = require("node:net");
 const { mkdtemp, readFile, rm, stat } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
@@ -7,7 +9,44 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const ROOT = join(__dirname, "..");
-const { startServer, connectCdp, waitFor, evaluate, findChromePath } = require("./browser-helpers");
+const { startServer, stopServer, connectCdp, waitFor, evaluate, findChromePath } = require("./browser-helpers");
+
+test("offline server shutdown closes unfinished browser HTTP connections", { timeout: 2000 }, async (context) => {
+  const server = await startServer();
+  const accepted = once(server, "connection");
+  const client = createConnection({ host: "127.0.0.1", port: server.address().port });
+  context.after(async () => { client.destroy(); await stopServer(server); });
+  await Promise.all([once(client, "connect"), accepted]);
+  // Chrome can have a speculative connection or an unfinished request when
+  // network emulation switches offline. It will not send the remaining bytes.
+  client.write("GET / HTTP/1.1\r\nHost: localhost\r\n");
+  let connectionError;
+  client.on("error", (error) => { connectionError = error; });
+  const closed = new Promise((resolve) => client.once("close", resolve));
+  await stopServer(server);
+  await closed;
+  assert.equal(server.listening, false);
+  assert.ok(!connectionError || connectionError.code === "ECONNRESET");
+});
+
+test("CDP commands time out or reject on disconnect instead of hanging the test", async (context) => {
+  const originalWebSocket = global.WebSocket;
+  let transport;
+  class BrowserTransport extends EventTarget {
+    constructor() { super(); transport = this; queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
+    send(value) { this.lastCommand = JSON.parse(value); }
+    close() { this.dispatchEvent(new Event("close")); }
+    reply(id) { this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ id, result: {} }) })); }
+  }
+  global.WebSocket = BrowserTransport;
+  context.after(() => { global.WebSocket = originalWebSocket; });
+  const browser = await connectCdp("ws://test.invalid", { timeoutMs: 40 });
+  await assert.rejects(browser.send("Runtime.evaluate", { expression: "new Promise(() => {})" }), { code: "CDP_TIMEOUT" });
+  assert.doesNotThrow(() => transport.reply(transport.lastCommand.id), "late responses to timed-out commands must be ignored");
+  const pending = browser.send("Page.reload");
+  browser.close();
+  await assert.rejects(pending, /CDP connection closed/);
+});
 
 test("guest entry, invoice editor, responsive layout, draft, print, and offline shell", async (context) => {
   const chromePath = await findChromePath();
@@ -28,7 +67,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
 
   context.after(async () => {
     chrome.kill();
-    server.close();
+    await stopServer(server);
     await Promise.race([
       new Promise((resolve) => chrome.once("exit", resolve)),
       new Promise((resolve) => setTimeout(resolve, 1500)),
@@ -86,8 +125,8 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     syncStatus: "Saved locally",
     storageNote: "Invoices and drafts exist only in this browser profile. Clearing site data, using private browsing, or changing devices can remove access. Download a backup regularly.",
     brandName: "Ledgerly",
-    headerLogo: "./ledgerly-mark.png?v=53",
-    invoiceLogo: "./eng-hoon-residences-logo.png?v=53",
+    headerLogo: "./ledgerly-mark.png?v=54",
+    invoiceLogo: "./eng-hoon-residences-logo.png?v=54",
     title: "Invoices | Ledgerly",
   });
 
@@ -1668,12 +1707,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v53'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v54'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v53", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v54", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,
@@ -1711,7 +1750,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     connectionType: "none",
   });
   await evaluate(page, "window.__offlineReloadMarker = 'before'");
-  await new Promise((resolve) => server.close(resolve));
+  await stopServer(server);
   // A hard reload bypasses the service worker; verify a normal offline reload.
   await page.send("Page.reload");
   await waitFor(() => evaluate(page, "document.readyState === 'complete' && document.querySelector('#invoiceForm') !== null && typeof window.__offlineReloadMarker === 'undefined'"), 8000);

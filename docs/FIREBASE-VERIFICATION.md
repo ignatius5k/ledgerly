@@ -22,9 +22,17 @@ Save invoice commits invoice data to Firestore, generates the actual PDF, and up
 
 The history Download PDF action retrieves the stored current revision after sign-in, using an authenticated SDK download. Other users and anonymous requests cannot access it. Files are immutable per revision, limited to 10 MiB, and checked against the current invoice; a fingerprint prevents accidental reuse after a deleted ID is recreated with different invoice data.
 
+### Exact PDF consistency follow-up
+
+The immediate **Save as PDF** action and cloud upload use the same generated Blob. If another renderer has already stored a PDF for that revision, the app now loads that existing file and uses its exact bytes for immediate downloads and printing before confirming success. This also preserves PDF metadata, which can differ between separate renderings of identical invoice content. A regression test first reproduced a SHA-256 mismatch in that case, then passed after the fix; it checks immediate and history downloads against the stored original.
+
+The live test invoice was saved again as `PDF-EQUALITY-20260917` (revision 2). Its immediate download and the authenticated history download after reloading the app are both **183,549 bytes**, with SHA-256 `da2a19a97cd84f66c2381c6240513ddf807acc6c461314b114626ec85b052cab`. The PDF was inspected as a single A4 page with the expected invoice layout, logo, amount, and customer text.
+
 ## Automated verification
 
-Final results: **29 automated tests passed** across 10 application/infrastructure tests, 5 Firebase browser scenarios, 8 authentication/Firestore SDK tests, and 6 PDF Storage tests. The last fallback sign-out regression was rerun after its final fix and passed. Production build and whitespace checks passed.
+Current local results: **32 automated tests passed** across 12 application/infrastructure tests, 6 Firebase browser scenarios, 8 authentication/Firestore SDK tests, and 6 PDF Storage tests. Production build, production dependency audit, and whitespace checks passed.
+
+The initial GitHub run timed out in the broad application browser scenario. The harness now terminates unfinished HTTP connections when testing offline mode and bounds browser commands with diagnostic errors. Regressions cover held HTTP requests and browser command timeout/disconnect behavior without increasing the overall test timeout.
 
 The checks found and fixed a draft revision race during overlapping sync/sign-out and added session checks that suppress late PDF downloads/print output after an account change.
 
