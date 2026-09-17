@@ -1,4 +1,4 @@
-# Firebase verification — 17 September 2026
+# Firebase verification — 17–18 September 2026
 
 ## Live computer-use evidence
 
@@ -15,6 +15,21 @@ The production-configured local build at `http://localhost:55334/` connects to `
 - An unauthenticated request to the real object's Firebase download endpoint returned HTTP **403**, confirming that the stored test PDF is not anonymously readable without credentials or a sharing token.
 
 The synthetic verification account and test invoice were retained so registration and storage can be inspected. They contain no real customer information. Billing was activated by the owner; no public website deployment was performed during this verification.
+
+## Public GitHub Pages verification — 18 September 2026
+
+The built Firebase app was deployed to `https://ignatius5k.github.io/ledgerly/` through GitHub Actions. The previous repository-root deployment omitted the generated SDK and served a null Firebase configuration. The public app now serves both successfully, and [run 35243617285](https://github.com/ignatius5k/ledgerly/actions/runs/35243617285) passed verification and deployment.
+
+Live computer-use checks on the public URL confirmed:
+
+- Email sign-in with the original verification account loaded `PDF-EQUALITY-20260917`, previously saved through the local production-configured app. This confirms the public site loads the same account's Firebase invoice history.
+- Google sign-in completed through Google's real account chooser. The existing Google UID was reused, and the device-data import dialog preserved the browser's existing invoice and draft when **Use account without importing** was selected.
+- A new synthetic account was registered from Pages. Firebase Authentication → Users shows its Email provider and UID `qb9dCgBciWhEpP6vaT6khXtIYtD3`.
+- The new account saved `PAGES-VERIFY-20260918` for `PAGES STORAGE VERIFICATION — TEST ONLY`, SGD 1.00. The app confirmed **PDF saved to your account**. After sign-out and sign-in, history restored the invoice and downloaded its stored PDF.
+- The immediate PDF download and history download after sign-in are both **181,106 bytes**, with identical SHA-256 `e853bbe91cc2409985ae21b7be611ad0c035389b12b621b49b1784fed31282f5`. The rendered PDF is one A4 page with the expected logo, customer, line item, and SGD 1.00 total.
+- Firebase Storage contains `users/qb9dCgBciWhEpP6vaT6khXtIYtD3/invoices/invoice-71a6463d-32aa-46d9-8b93-4ec4baa68307/revisions/1.pdf`, shown as `application/pdf`, 176.86 KB. An unauthenticated request to this new object returns HTTP **403**.
+
+The live 842px layout exposed hidden account controls and displaced invoice action columns. The responsive CSS now keeps account identity and Sign out available, aligns table cells to their headers, and preserves mobile invoice cards. Browser regressions check column geometry and actual pointer interaction with Sign out, including correct hiding after sign-out.
 
 ## Implemented PDF behavior
 

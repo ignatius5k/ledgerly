@@ -221,12 +221,14 @@
     margin-top: auto;
     padding: 15px 9px 2px;
     align-items: flex-start;
+    flex-direction: column;
     border-top: 1px solid var(--line);
   }
 
   .account-identity {
     position: relative;
     padding-left: 16px;
+    max-width: 100%;
   }
 
   .account-identity::before {
@@ -254,6 +256,11 @@
 
   #signOutButton[hidden] {
     display: none !important;
+  }
+
+  #signOutButton {
+    min-height: 44px;
+    flex-shrink: 0;
   }
 
   .button-primary {
@@ -366,7 +373,7 @@
   .invoice-table-head,
   .invoice-record {
     display: grid;
-    grid-template-columns: minmax(150px, 1.05fr) minmax(170px, 1.25fr) minmax(105px, 0.78fr) minmax(50px, 0.42fr) minmax(90px, 0.66fr) minmax(220px, auto);
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.25fr) 105px 50px 90px 220px;
     gap: 18px;
     align-items: center;
   }
@@ -545,6 +552,17 @@
 }
 
 @media screen and (max-width: 1359px) {
+  .invoice-table-head,
+  .invoice-record {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.15fr) 105px 48px 84px 108px;
+    gap: 12px;
+  }
+
+  .invoice-record-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .workspace {
     grid-template-columns: 1fr;
   }
@@ -617,6 +635,7 @@
     flex: 0 1 auto;
     flex-direction: row;
     gap: 7px;
+    min-width: 0;
   }
 
   .header-actions > .button {
@@ -639,9 +658,24 @@
   }
 
   body[data-page="history"] #invoiceListButton,
-  body[data-page="editor"] #newInvoiceButton,
-  .account-controls {
+  body[data-page="editor"] #newInvoiceButton {
     display: none !important;
+  }
+
+  .account-controls {
+    width: auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0 0 0 12px;
+    align-items: center;
+    flex-direction: row;
+    border-top: 0;
+    border-left: 1px solid var(--line);
+  }
+
+  .account-email {
+    display: block;
+    max-width: 190px;
   }
 
   #installButton {
@@ -659,17 +693,6 @@
     padding-top: 34px;
   }
 
-  .invoice-table-head,
-  .invoice-record {
-    grid-template-columns: minmax(145px, 0.9fr) minmax(180px, 1.15fr) minmax(105px, 0.7fr) minmax(48px, 0.35fr) minmax(84px, 0.55fr) minmax(108px, auto);
-    gap: 12px;
-  }
-
-  .invoice-record-actions {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
   .workspace {
     min-height: calc(100dvh - 66px);
   }
@@ -683,6 +706,33 @@
   }
 }
 
+@media screen and (min-width: 701px) {
+  /* Flattened identity and metadata participate in the same six-column grid.
+     Override the original card layout's explicit action-column placement. */
+  .invoice-number {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .invoice-customer {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .invoice-record-meta dd {
+    grid-row: 1;
+  }
+
+  .invoice-record-meta > div:nth-child(1) dd { grid-column: 3; }
+  .invoice-record-meta > div:nth-child(2) dd { grid-column: 4; }
+  .invoice-record-meta > div:nth-child(3) dd { grid-column: 5; }
+
+  .invoice-record-actions {
+    grid-column: 6;
+    grid-row: 1;
+  }
+}
+
 @media screen and (max-width: 767px) {
   .header-actions > #printButton {
     display: none;
@@ -691,11 +741,31 @@
 
 @media screen and (max-width: 700px) {
   body {
-    padding-top: calc(62px + env(safe-area-inset-top));
+    padding-top: 0;
   }
 
   .app-header {
+    position: sticky;
     min-height: 62px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .header-actions {
+    display: contents;
+  }
+
+  .account-controls {
+    width: 100%;
+    padding: 8px 0 0;
+    justify-content: space-between;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .account-email,
+  .sync-status {
+    max-width: calc(100vw - 140px);
   }
 
   .brand-name {

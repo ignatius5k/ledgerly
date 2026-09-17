@@ -125,8 +125,8 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     syncStatus: "Saved locally",
     storageNote: "Invoices and drafts exist only in this browser profile. Clearing site data, using private browsing, or changing devices can remove access. Download a backup regularly.",
     brandName: "Ledgerly",
-    headerLogo: "./ledgerly-mark.png?v=57",
-    invoiceLogo: "./eng-hoon-residences-logo.png?v=57",
+    headerLogo: "./ledgerly-mark.png?v=58",
+    invoiceLogo: "./eng-hoon-residences-logo.png?v=58",
     title: "Invoices | Ledgerly",
   });
 
@@ -1374,6 +1374,38 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     });
   })()`));
   assert.deepEqual(savedInvoiceDeletion, { before: 2, after: 1, deleteButtons: 1, draftStored: false, editorBillTo: "" });
+  for (const width of [1440, 1000, 842, 375]) {
+    await page.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 500 });
+    const layout = JSON.parse(await evaluate(page, `(() => {
+      window.scrollTo(0, 0);
+      const record = document.querySelector('.invoice-record');
+      const cells = [record.querySelector('.invoice-number'), record.querySelector('.invoice-customer'), ...record.querySelectorAll('.invoice-record-meta dd'), record.querySelector('.invoice-record-actions')];
+      const headings = [...document.querySelectorAll('.invoice-table-head span')];
+      const email = document.querySelector('#accountEmail');
+      const button = document.querySelector('#signOutButton');
+      const buttonRect = button.getBoundingClientRect();
+      const x = buttonRect.left + buttonRect.width / 2;
+      const y = buttonRect.top + buttonRect.height / 2;
+      return JSON.stringify({
+        fits: document.documentElement.scrollWidth <= innerWidth,
+        emailVisible: email.getClientRects().length > 0 && email.getBoundingClientRect().width > 0 && Boolean(email.textContent.trim()),
+        signOutVisible: buttonRect.width >= 44 && buttonRect.height >= 44 && buttonRect.left >= 0 && buttonRect.right <= innerWidth && buttonRect.top >= 0 && buttonRect.bottom <= innerHeight,
+        signOutReceivesPointer: button.contains(document.elementFromPoint(x, y)),
+        columnsAlign: cells.every((cell, index) => Math.abs(cell.getBoundingClientRect().left - headings[index].getBoundingClientRect().left) < 1),
+        sameRow: cells.every(cell => Math.abs((cell.getBoundingClientRect().top + cell.getBoundingClientRect().height / 2) - (cells[0].getBoundingClientRect().top + cells[0].getBoundingClientRect().height / 2)) < 1),
+        metadataBelowIdentity: record.querySelector('.invoice-record-meta').getBoundingClientRect().top >= record.firstElementChild.getBoundingClientRect().bottom,
+        actionsBelowMetadata: record.querySelector('.invoice-record-actions').getBoundingClientRect().top >= record.querySelector('.invoice-record-meta').getBoundingClientRect().bottom
+      });
+    })()`));
+    assert.equal(layout.fits, true, `${width}px populated history must fit the viewport`);
+    assert.equal(layout.emailVisible, true, `${width}px account identity must remain visible`);
+    assert.equal(layout.signOutVisible && layout.signOutReceivesPointer, true, `${width}px Sign out must be visible and receive pointer input`);
+    if (width > 700) {
+      assert.equal(layout.columnsAlign && layout.sameRow, true, `${width}px invoice cells must align with their own column headers`);
+    } else {
+      assert.equal(layout.metadataBelowIdentity && layout.actionsBelowMetadata, true, `${width}px invoice cards must keep identity, metadata and actions separate`);
+    }
+  }
   await page.send("Emulation.setDeviceMetricsOverride", { width: 320, height: 640, deviceScaleFactor: 1, mobile: true });
   const mobileHistoryActions = JSON.parse(await evaluate(page, `(() => {
     const record = document.querySelector('.invoice-record').getBoundingClientRect();
@@ -1495,32 +1527,52 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.ok(mobileHistoryLayout.records.every(record => record.actionWidths.every(width => width >= 44)));
   await page.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 
-  const blockedSignOut = JSON.parse(await evaluate(page, `(async () => {
-    window.confirm = () => false;
-    const operation = await window.invoiceDraftOutbox.putSave('test-user-1', {
-      invoiceNumber: 'EHR-RECOVERY-001',
-      billTo: 'Recovered customer'
+  let signOutPoint;
+  for (const width of [842, 375]) {
+    await page.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 500 });
+    signOutPoint = JSON.parse(await evaluate(page, `(async () => {
+      window.scrollTo(0, 0);
+      window.__signOutConfirmCalls = 0;
+      window.confirm = () => { window.__signOutConfirmCalls += 1; return false; };
+      window.__pendingSignOutOperation = await window.invoiceDraftOutbox.putSave('test-user-1', {
+        invoiceNumber: 'EHR-RECOVERY-001',
+        billTo: 'Recovered customer'
+      });
+      const button = document.querySelector('#signOutButton');
+      const rect = button.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      return JSON.stringify({ x, y, hit: button.contains(document.elementFromPoint(x, y)) });
+    })()`));
+    assert.equal(signOutPoint.hit, true, `${width}px Sign out must be reachable without a scripted DOM click`);
+    await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x: signOutPoint.x, y: signOutPoint.y, button: "left", clickCount: 1 });
+    await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: signOutPoint.x, y: signOutPoint.y, button: "left", clickCount: 1 });
+    await waitFor(() => evaluate(page, "window.__signOutConfirmCalls === 1 && !document.querySelector('#signOutButton').disabled"));
+    const blockedSignOut = JSON.parse(await evaluate(page, `(async () => {
+      const result = {
+        page: document.body.dataset.page,
+        status: document.querySelector('#syncStatus').textContent,
+        signOutCalls: window.__BROWSER_BACKEND_MOCK__.controls.signOutCalls,
+        pending: await window.invoiceDraftOutbox.has('test-user-1')
+      };
+      await window.invoiceDraftOutbox.remove('test-user-1', window.__pendingSignOutOperation.operationId);
+      return JSON.stringify(result);
+    })()`));
+    assert.deepEqual(blockedSignOut, {
+      page: "history",
+      status: "Sync this draft before signing out",
+      signOutCalls: 0,
+      pending: true,
     });
-    document.querySelector('#signOutButton').click();
-    while (!document.querySelector('#toast').textContent.includes('has not synced')) await new Promise(resolve => setTimeout(resolve, 0));
-    const result = {
-      page: document.body.dataset.page,
-      status: document.querySelector('#syncStatus').textContent,
-      signOutCalls: window.__BROWSER_BACKEND_MOCK__.controls.signOutCalls,
-      pending: await window.invoiceDraftOutbox.has('test-user-1')
-    };
-    await window.invoiceDraftOutbox.remove('test-user-1', operation.operationId);
-    return JSON.stringify(result);
-  })()`));
-  assert.deepEqual(blockedSignOut, {
-    page: "history",
-    status: "Sync this draft before signing out",
-    signOutCalls: 0,
-    pending: true,
-  });
+  }
 
-  await evaluate(page, "document.querySelector('#signOutButton').click(); true");
+  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x: signOutPoint.x, y: signOutPoint.y, button: "left", clickCount: 1 });
+  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: signOutPoint.x, y: signOutPoint.y, button: "left", clickCount: 1 });
   await waitFor(() => evaluate(page, "document.body.dataset.page === 'auth' && !document.querySelector('#authPage').hidden"));
+  for (const width of [375, 842, 1440]) {
+    await page.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 500 });
+    assert.equal(await evaluate(page, "document.querySelector('#accountControls').getClientRects().length"), 0, `${width}px signed-out account controls must respect hidden`);
+  }
   const signedOutState = JSON.parse(await evaluate(page, `JSON.stringify({
     title: document.querySelector('#authTitle').textContent,
     historyHidden: document.querySelector('#invoiceListPage').hidden,
@@ -1731,12 +1783,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v57'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v58'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v57", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v58", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,
