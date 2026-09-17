@@ -1,0 +1,7 @@
+{
+  "indexes": [],
+  "fieldOverrides": [
+    { "collectionGroup": "invoices", "fieldPath": "invoice", "indexes": [] },
+    { "collectionGroup": "drafts", "fieldPath": "invoice", "indexes": [] }
+  ]
+}

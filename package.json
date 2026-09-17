@@ -7,15 +7,24 @@
     "node": "24.19.0",
     "npm": "11.17.0"
   },
-  "description": "Device-local invoice generator for Eng Hoon Residences.",
+  "description": "Invoice generator with Firebase accounts, private cloud storage, and local draft recovery.",
   "scripts": {
-    "build": "npm run verify:vendor && node scripts/build-static.js",
-    "check": "node --check app.js && node --check backend.js && node --check outbox.js && node --check sw.js && node --check scripts/vendor-manifest.js && node --check scripts/sync-vendor.js && node --check scripts/verify-vendor.js && node --check scripts/build-static.js && node --check tests/browser-backend-mock.js && node --check tests/outbox.test.js && node --check tests/infrastructure.test.js && node --check tests/app.test.js",
+    "build": "npm run verify:vendor && npm run build:firebase && node scripts/build-static.js",
+    "check": "node --check app.js && node --check backend.js && node --check outbox.js && node --check sw.js && node --check scripts/vendor-manifest.js && node --check scripts/sync-vendor.js && node --check scripts/verify-vendor.js && node --check scripts/build-static.js && node --check tests/browser-backend-mock.js && node --check tests/outbox.test.js && node --check tests/infrastructure.test.js && node --check tests/app.test.js && node --check firebase-backend.mjs && node --check scripts/build-firebase.js",
     "sync:vendor": "node scripts/sync-vendor.js",
-    "test": "npm run check && node --test --test-concurrency=1 tests/outbox.test.js tests/infrastructure.test.js tests/app.test.js",
-    "verify:vendor": "node scripts/verify-vendor.js"
+    "test": "npm run check && node --test --test-timeout=120000 --test-concurrency=1 tests/outbox.test.js tests/infrastructure.test.js tests/app.test.js",
+    "verify:vendor": "node scripts/verify-vendor.js",
+    "build:firebase": "node scripts/build-firebase.js",
+    "pretest": "npm run build:firebase",
+    "test:firebase": "npm run build:firebase && firebase emulators:exec --project demo-ledgerly --only auth,firestore,storage \"node --test --test-timeout=120000 --test-concurrency=1 tests/firebase.test.mjs tests/firebase-storage.test.mjs tests/firebase-browser.test.js\""
   },
   "dependencies": {
+    "firebase": "12.19.0",
     "html2pdf.js": "0.14.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.2",
+    "esbuild": "0.28.2",
+    "firebase-tools": "15.30.0"
   }
 }

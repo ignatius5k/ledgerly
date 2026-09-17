@@ -351,6 +351,46 @@ textarea[aria-invalid="true"] {
   margin-top: 0;
 }
 
+.auth-google-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 22px;
+  color: #1f1f1f;
+  border-color: #747775;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.auth-google-button svg {
+  flex-shrink: 0;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.auth-divider + .auth-form {
+  margin-top: 20px;
+}
+
 .auth-primary-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -614,6 +654,7 @@ textarea[aria-invalid="true"] {
 
 .invoice-record-actions {
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -1314,6 +1355,34 @@ input[readonly] {
 .output-option-list {
   display: grid;
   gap: 10px;
+}
+
+.cloud-pdf-panel {
+  margin: -6px 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--workspace);
+}
+
+.cloud-pdf-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cloud-pdf-panel p[data-state="error"] {
+  color: var(--danger);
+}
+
+.cloud-pdf-panel p[data-state="saved"] {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.cloud-pdf-panel .button {
+  margin-top: 10px;
 }
 
 .output-option {

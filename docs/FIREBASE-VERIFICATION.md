@@ -1,0 +1,35 @@
+# Firebase verification — 17 September 2026
+
+## Live computer-use evidence
+
+The production-configured local build at `http://localhost:55334/` connects to `ledgerly-e0c95`. This is a local build using the real Firebase project; it is not a deployment to the public website.
+
+- Firebase Console shows Email/Password and Google providers enabled.
+- A synthetic account was created through the app’s Create account button. The same account appears in Authentication → Users with the Email provider. Its UID is `vOytoqz8yBdf3FOnA5eJhNxoJtO2`; signing out and signing back in with the same credentials also succeeded.
+- Google sign-in completed through the real Google account chooser and returned to the app. Firebase Authentication shows the project account with the Google provider, UID `BCml8dhQjCaF4uLl5jZirJPwQud2`.
+- Firestore initially did not exist. The default Standard database was created in `asia-southeast1` (Singapore), with deny-all production rules.
+- The private Firestore rules, invoice index exemptions, and Storage rules were published successfully with Firebase CLI in the owner's authorized Cloud Shell. Storage's specific service role for Firestore rule checks was granted. The app then opened its account workspace successfully.
+- After the owner completed billing setup, Firebase Console confirms Blaze (Free Trial). The default bucket `ledgerly-e0c95.firebasestorage.app` is in `US-EAST1`; Firestore remains in Singapore. The bucket's GET CORS configuration was applied and read back, matching `storage.cors.json`.
+- Through the live app UI, the synthetic account saved `PDF-VERIFY-20260917` for `PDF STORAGE VERIFICATION — TEST ONLY`, amount SGD 1.00. The output dialog confirmed **PDF saved to your account**. After sign-out and sign-in, the invoice appeared in history and **Download PDF** retrieved the stored file successfully.
+- Cloud Storage contains `users/vOytoqz8yBdf3FOnA5eJhNxoJtO2/invoices/invoice-0ed9fd2b-f979-4b1d-b55c-a9404831f5fa/revisions/1.pdf`, created at `2026-09-17T12:02:05Z`, content type `application/pdf`, size **183,098 bytes**. The downloaded file has a `%PDF-1.3` header and the same size and base64 MD5 as the cloud object: `1OAsbhTRkAaiXXap9qV//Q==`. Its SHA-256 is `f72f67ef39095d49dd91bb73047ef5745a85be8c882d6c569a4df17956ad1062`.
+- An unauthenticated request to the real object's Firebase download endpoint returned HTTP **403**, confirming that the stored test PDF is not anonymously readable without credentials or a sharing token.
+
+The synthetic verification account and test invoice were retained so registration and storage can be inspected. They contain no real customer information. Billing was activated by the owner; no public website deployment was performed during this verification.
+
+## Implemented PDF behavior
+
+Save invoice commits invoice data to Firestore, generates the actual PDF, and uploads it to a private revision-specific Cloud Storage path. The output dialog confirms PDF storage only after upload succeeds. An upload failure leaves the committed invoice data intact and offers retry, local download, and print.
+
+The history Download PDF action retrieves the stored current revision after sign-in, using an authenticated SDK download. Other users and anonymous requests cannot access it. Files are immutable per revision, limited to 10 MiB, and checked against the current invoice; a fingerprint prevents accidental reuse after a deleted ID is recreated with different invoice data.
+
+## Automated verification
+
+Final results: **29 automated tests passed** across 10 application/infrastructure tests, 5 Firebase browser scenarios, 8 authentication/Firestore SDK tests, and 6 PDF Storage tests. The last fallback sign-out regression was rerun after its final fix and passed. Production build and whitespace checks passed.
+
+The checks found and fixed a draft revision race during overlapping sync/sign-out and added session checks that suppress late PDF downloads/print output after an account change.
+
+Two agents independently covered authentication/workspace behavior and PDF persistence. Storage tests use only demo Firebase emulators. Coverage includes exact PDF bytes, private access, immutable retries, MIME/size restrictions, stale revisions, deletion access, restored-ID conflicts, and an actual browser download through the Firebase SDK.
+
+Browser coverage includes email signup/sign-in/sign-out, Google signup and returning users, cancellation and blocked popups, local invoice import, session reload, account isolation, offline draft recovery, real generated PDF upload/download, failed-upload retry, and late-response suppression after sign-out.
+
+See [deployment setup](DEPLOYMENT.md) for activation steps and [operations](OPERATIONS.md) for backup, retention, and recovery behavior.

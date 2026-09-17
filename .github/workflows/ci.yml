@@ -55,6 +55,15 @@ jobs:
       - name: Run application and infrastructure tests
         run: npm test
 
+      - name: Install Java for the Firestore emulator
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Verify Firebase authentication, invoice PDF storage, rules, and browser workflow
+        run: npm run test:firebase
+
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 

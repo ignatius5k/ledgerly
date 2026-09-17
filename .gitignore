@@ -9,3 +9,8 @@ redesign-drafts/*.png
 Thumbs.db
 *.log
 .serena/
+vendor/firebase-client.js
+firebase-config.local.json
+.firebase/
+*-debug.log*
+.env*

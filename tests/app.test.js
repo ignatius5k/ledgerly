@@ -1,116 +1,13 @@
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
-const { createServer } = require("node:http");
 const { mkdtemp, readFile, rm, stat } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
-const { extname, join, normalize } = require("node:path");
+const { join } = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
 const ROOT = join(__dirname, "..");
-const CHROME_CANDIDATES = [
-  process.env.CHROME_PATH,
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-  "/Applications/Chromium.app/Contents/MacOS/Chromium",
-  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-  "/usr/bin/google-chrome",
-  "/usr/bin/chromium",
-].filter(Boolean);
-const TYPES = {
-  ".css": "text/css",
-  ".html": "text/html",
-  ".jpeg": "image/jpeg",
-  ".js": "text/javascript",
-  ".json": "application/json",
-  ".png": "image/png",
-  ".webmanifest": "application/manifest+json",
-};
-
-function startServer() {
-  const server = createServer(async (request, response) => {
-    try {
-      const pathname = new URL(request.url, "http://localhost").pathname;
-      const relativePath = pathname === "/" ? "index.html" : decodeURIComponent(pathname.slice(1));
-      const filePath = normalize(join(ROOT, relativePath));
-      if (!filePath.startsWith(ROOT)) throw new Error("Invalid path");
-      const info = await stat(filePath);
-      if (!info.isFile()) throw new Error("Not a file");
-      response.setHeader("Content-Type", TYPES[extname(filePath)] || "application/octet-stream");
-      response.end(await readFile(filePath));
-    } catch {
-      response.statusCode = 404;
-      response.end("Not found");
-    }
-  });
-  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
-}
-
-function connectCdp(url) {
-  const socket = new WebSocket(url);
-  let nextId = 0;
-  const pending = new Map();
-  const listeners = new Map();
-  socket.addEventListener("message", (event) => {
-    const message = JSON.parse(event.data);
-    if (!message.id) {
-      for (const listener of listeners.get(message.method) || []) listener(message.params || {});
-      return;
-    }
-    const callback = pending.get(message.id);
-    pending.delete(message.id);
-    if (message.error) callback.reject(new Error(message.error.message));
-    else callback.resolve(message.result);
-  });
-  return new Promise((resolve, reject) => {
-    socket.addEventListener("error", reject, { once: true });
-    socket.addEventListener("open", () => resolve({
-      close: () => socket.close(),
-      on(method, listener) {
-        const methodListeners = listeners.get(method) || [];
-        methodListeners.push(listener);
-        listeners.set(method, methodListeners);
-      },
-      send(method, params = {}) {
-        const id = ++nextId;
-        socket.send(JSON.stringify({ id, method, params }));
-        return new Promise((resolveCommand, rejectCommand) => {
-          pending.set(id, { resolve: resolveCommand, reject: rejectCommand });
-        });
-      },
-    }), { once: true });
-  });
-}
-
-async function waitFor(check, timeout = 5000) {
-  const started = Date.now();
-  while (Date.now() - started < timeout) {
-    const value = await check();
-    if (value) return value;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error("Timed out waiting for browser state");
-}
-
-async function evaluate(cdp, expression) {
-  const result = await cdp.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-  if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
-  return result.result.value;
-}
-
-async function findChromePath() {
-  for (const candidate of CHROME_CANDIDATES) {
-    try {
-      await stat(candidate);
-      return candidate;
-    } catch {
-      // Try the next common browser path.
-    }
-  }
-  return undefined;
-}
+const { startServer, connectCdp, waitFor, evaluate, findChromePath } = require("./browser-helpers");
 
 test("guest entry, invoice editor, responsive layout, draft, print, and offline shell", async (context) => {
   const chromePath = await findChromePath();
@@ -189,8 +86,8 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     syncStatus: "Saved locally",
     storageNote: "Invoices and drafts exist only in this browser profile. Clearing site data, using private browsing, or changing devices can remove access. Download a backup regularly.",
     brandName: "Ledgerly",
-    headerLogo: "./ledgerly-mark.png?v=50",
-    invoiceLogo: "./eng-hoon-residences-logo.png?v=50",
+    headerLogo: "./ledgerly-mark.png?v=53",
+    invoiceLogo: "./eng-hoon-residences-logo.png?v=53",
     title: "Invoices | Ledgerly",
   });
 
@@ -1536,6 +1433,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   await page.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 
   const blockedSignOut = JSON.parse(await evaluate(page, `(async () => {
+    window.confirm = () => false;
     const operation = await window.invoiceDraftOutbox.putSave('test-user-1', {
       invoiceNumber: 'EHR-RECOVERY-001',
       billTo: 'Recovered customer'
@@ -1770,12 +1668,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v50'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v53'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v50", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v53", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,
@@ -1814,8 +1712,9 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   });
   await evaluate(page, "window.__offlineReloadMarker = 'before'");
   await new Promise((resolve) => server.close(resolve));
-  await page.send("Page.reload", { ignoreCache: true });
-  await waitFor(() => evaluate(page, "document.readyState === 'complete' && document.querySelector('#invoiceForm') !== null"), 8000);
+  // A hard reload bypasses the service worker; verify a normal offline reload.
+  await page.send("Page.reload");
+  await waitFor(() => evaluate(page, "document.readyState === 'complete' && document.querySelector('#invoiceForm') !== null && typeof window.__offlineReloadMarker === 'undefined'"), 8000);
   assert.equal(await evaluate(page, "typeof window.__offlineReloadMarker"), "undefined");
   assert.equal(await evaluate(page, "typeof window.html2pdf"), "undefined");
   assert.equal(await evaluate(page, "document.querySelector('script[data-pdf-library]') === null"), true);
