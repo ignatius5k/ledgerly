@@ -1462,6 +1462,9 @@ async function deleteStoredDraft() {
   if (!currentUser) return true;
   const userId = currentUser.id;
   await stageDraftDelete();
+  // An earlier save can still own the sync promise. Let it rebase the queued
+  // deletion, then flush that deletion before resetting the editor.
+  if (draftSyncPromise) await draftSyncPromise;
   await flushDraftOutbox({ force: true });
   if (await draftOutbox.has(userId)) throw new Error("Draft deletion is waiting to sync.");
   draftRevision = undefined;

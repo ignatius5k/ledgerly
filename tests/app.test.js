@@ -125,8 +125,8 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     syncStatus: "Saved locally",
     storageNote: "Invoices and drafts exist only in this browser profile. Clearing site data, using private browsing, or changing devices can remove access. Download a backup regularly.",
     brandName: "Ledgerly",
-    headerLogo: "./ledgerly-mark.png?v=54",
-    invoiceLogo: "./eng-hoon-residences-logo.png?v=54",
+    headerLogo: "./ledgerly-mark.png?v=55",
+    invoiceLogo: "./eng-hoon-residences-logo.png?v=55",
     title: "Invoices | Ledgerly",
   });
 
@@ -881,12 +881,30 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   })()`));
   assert.deepEqual(clearedFilenameBehavior, { reset: "INV-AFTER-RELOAD", numberBefore: "INV-AFTER-RELOAD", synced: "INV-CLEAR-SYNC", checked: false, readOnly: true });
 
-  await evaluate(page, `(async () => {
-    window.confirm = () => true;
-    const before = document.querySelector('#invoiceNumber').value;
-    document.querySelector('#clearDraftButton').click();
-    while (document.querySelector('#invoiceNumber').value === before) await new Promise(resolve => setTimeout(resolve, 0));
+  await evaluate(page, "persistDraftImmediately()");
+  await evaluate(page, `(() => {
+    // Keep the previous save in flight while Clear saved draft queues its
+    // deletion. Slow CI exposed this ordering; make it deterministic everywhere.
+    window.__originalDraftSave = window.invoiceBackend.saveDraft;
+    window.invoiceBackend.saveDraft = async (...args) => {
+      const result = await window.__originalDraftSave(...args);
+      await new Promise(resolve => { window.__releaseDraftBeforeClear = resolve; });
+      return result;
+    };
+    const number = document.querySelector('#invoiceNumber');
+    number.dispatchEvent(new Event('input', { bubbles: true }));
   })()`);
+  await waitFor(() => evaluate(page, "typeof window.__releaseDraftBeforeClear === 'function'"));
+  const numberBeforeClear = await evaluate(page, "document.querySelector('#invoiceNumber').value");
+  await evaluate(page, "window.confirm = () => true; document.querySelector('#clearDraftButton').click(); true");
+  await waitFor(() => evaluate(page, "window.invoiceDraftOutbox.get('test-user-1').then(operation => operation?.type === 'delete')"));
+  await evaluate(page, "window.invoiceBackend.saveDraft = window.__originalDraftSave; window.__releaseDraftBeforeClear(); true");
+  await waitFor(() => evaluate(page, `document.querySelector('#invoiceNumber').value !== ${JSON.stringify(numberBeforeClear)} || document.querySelector('#toast').textContent.includes('Draft deletion is waiting to sync')`));
+  assert.notEqual(
+    await evaluate(page, "document.querySelector('#invoiceNumber').value"),
+    numberBeforeClear,
+    "Clear saved draft must finish its queued deletion after an in-flight save before resetting the editor",
+  );
   assert.equal(await evaluate(page, "localStorage.getItem('test-remote-draft')"), null);
   assert.match(await evaluate(page, "document.querySelector('#invoiceNumber').value"), /^EHR-\d{8}-\d{3,}$/);
   await evaluate(page, "window.dispatchEvent(new PageTransitionEvent('pagehide'))");
@@ -1707,12 +1725,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v54'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v55'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v54", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v55", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,
