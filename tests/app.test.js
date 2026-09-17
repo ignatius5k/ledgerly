@@ -125,8 +125,8 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     syncStatus: "Saved locally",
     storageNote: "Invoices and drafts exist only in this browser profile. Clearing site data, using private browsing, or changing devices can remove access. Download a backup regularly.",
     brandName: "Ledgerly",
-    headerLogo: "./ledgerly-mark.png?v=55",
-    invoiceLogo: "./eng-hoon-residences-logo.png?v=55",
+    headerLogo: "./ledgerly-mark.png?v=56",
+    invoiceLogo: "./eng-hoon-residences-logo.png?v=56",
     title: "Invoices | Ledgerly",
   });
 
@@ -1725,12 +1725,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v55'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v56'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v55", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v56", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,

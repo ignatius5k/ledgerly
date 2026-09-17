@@ -1,20 +1,20 @@
 const CACHE_PREFIX = "invoice-studio-";
-const CACHE_NAME = `${CACHE_PREFIX}v55`;
+const CACHE_NAME = `${CACHE_PREFIX}v56`;
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=55",
-  "./redesign.css?v=55",
-  "./firebase-config.js?v=55",
-  "./vendor/firebase-client.js?v=55",
-  "./backend.js?v=55",
-  "./outbox.js?v=55",
-  "./app.js?v=55",
-  "./manifest.webmanifest?v=55",
-  "./ledgerly-mark.png?v=55",
-  "./eng-hoon-residences-logo.png?v=55",
-  "./icon-192.png?v=55",
-  "./icon-512.png?v=55"
+  "./styles.css?v=56",
+  "./redesign.css?v=56",
+  "./firebase-config.js?v=56",
+  "./vendor/firebase-client.js?v=56",
+  "./backend.js?v=56",
+  "./outbox.js?v=56",
+  "./app.js?v=56",
+  "./manifest.webmanifest?v=56",
+  "./ledgerly-mark.png?v=56",
+  "./eng-hoon-residences-logo.png?v=56",
+  "./icon-192.png?v=56",
+  "./icon-512.png?v=56"
 ];
 const RUNTIME_ASSETS = ["./vendor/html2pdf.bundle.min.js?v=32"];
 

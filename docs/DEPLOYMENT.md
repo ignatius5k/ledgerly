@@ -6,7 +6,15 @@ Ledgerly remains a static PWA. Firebase's browser SDK is bundled locally during 
 
 Verified on 17 September 2026: **Ledgerly / ledgerly-e0c95** has a configured web app, both Email/Password and Google providers enabled, and both an email/password test account and the project account signed in through Google appear in Authentication after live app sign-in. The default Standard Firestore database is in `asia-southeast1` (Singapore). The owner activated Blaze (Free Trial), and the default Storage bucket `ledgerly-e0c95.firebasestorage.app` is in `US-EAST1`.
 
-Private Firestore/Storage rules and invoice index exemptions are deployed. Storage's permission to check Firestore and the bucket GET CORS configuration are active. A real test invoice and its 183,098-byte PDF were saved through the app, then retrieved from history after sign-out/sign-in. The downloaded PDF matched the cloud object's size and checksum. See [verification evidence](FIREBASE-VERIFICATION.md). This used the local production-configured build at `http://localhost:55334/`; the public website has not been redeployed during this verification.
+Private Firestore/Storage rules and invoice index exemptions are deployed. Storage's permission to check Firestore and the bucket GET CORS configuration are active. A real test invoice and its 183,098-byte PDF were saved through the app, then retrieved from history after sign-out/sign-in. The downloaded PDF matched the cloud object's size and checksum. See [verification evidence](FIREBASE-VERIFICATION.md). That initial cloud verification used the local production-configured build at `http://localhost:55334/`. GitHub Pages deployment is described below.
+
+## GitHub Pages
+
+The public app is at `https://ignatius5k.github.io/ledgerly/`. Pages must use **GitHub Actions** as its publishing source. Publishing the repository root directly serves the unconfigured development files and omits the generated Firebase SDK, leaving the app in device-only mode.
+
+The `Verify` workflow runs the application and Firebase tests, audit, and build checks. For `main`, it then rebuilds `dist/` using the **FIREBASE_WEB_CONFIG** repository secret, verifies that the Firebase configuration (including `storageBucket`) and bundled SDK are present, and publishes the artifact through the `github-pages` environment. Missing configuration fails the deployment rather than publishing a device-only app. Pull requests and `staging` do not deploy.
+
+Set the repository secret to the Firebase public web configuration JSON described below. Never put service account credentials in that secret. The Firebase authorized-domain list and bucket CORS configuration must include `ignatius5k.github.io`. The app uses relative asset paths so it works under `/ledgerly/`. Existing visitors can select **Update ready** after the new service worker arrives; device invoices remain available for the explicit account-import flow.
 
 ## Setup
 
