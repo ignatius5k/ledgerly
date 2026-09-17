@@ -98,7 +98,7 @@ Rules require the authenticated UID to match the path, validate structure and it
 
 Normal history loading uses server pagination and a count. Substring search scans only the signed-in user's invoices because Firestore has no native substring index; add a dedicated search index before serving very large accounts. Invoice payload maps are exempted from indexing in `firestore.indexes.json`.
 
-Automatic numbers use transactions; manual numbers and intentional duplicate invoices remain supported. Authentication persists the session, Firestore uses a memory cache, and offline drafts use the account-keyed IndexedDB outbox.
+Automatic numbers use transactions; manual numbers and intentional duplicate invoices remain supported. Authentication persists the session, Firestore uses a memory cache, and offline drafts use an account-keyed IndexedDB outbox with a synchronous recovery journal. The journal preserves the latest edit if a refresh interrupts the queued write; it is removed after the matching operation is acknowledged.
 
 ## Release and rollback
 

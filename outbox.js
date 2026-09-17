@@ -4,8 +4,59 @@
   const DATABASE_NAME = "invoice-studio-reliability-v1";
   const DATABASE_VERSION = 1;
   const STORE_NAME = "draft-outbox";
+  const RECOVERY_KEY_PREFIX = "invoice-studio-draft-recovery-v1:";
   let databasePromise;
   const memoryFallback = new Map();
+
+  function recoveryKey(userId) {
+    return `${RECOVERY_KEY_PREFIX}${encodeURIComponent(userId)}`;
+  }
+
+  function readRecovery(userId) {
+    const memoryValue = memoryFallback.get(userId);
+    if (memoryValue) return memoryValue;
+    try {
+      const value = JSON.parse(localStorage.getItem(recoveryKey(userId)));
+      if (value?.userId === userId && typeof value.operationId === "string"
+        && ["save", "delete"].includes(value.type)) return { ...value, storage: "localstorage" };
+    } catch {}
+    return null;
+  }
+
+  function saveRecovery(operation) {
+    // This must run synchronously in the input/pagehide event. Browsers may
+    // terminate the document before a queued IndexedDB transaction can start.
+    const value = { ...operation };
+    delete value.storage;
+    try {
+      localStorage.setItem(recoveryKey(value.userId), JSON.stringify(value));
+      memoryFallback.delete(value.userId);
+      return { ...value, storage: "localstorage" };
+    } catch {
+      // A full storage area can reject this larger snapshot while still
+      // retaining an older one. Do not let that obsolete journal hide a newer
+      // successful IndexedDB write when the page next opens.
+      try { localStorage.removeItem(recoveryKey(value.userId)); } catch {}
+      const memoryValue = { ...value, storage: "memory" };
+      memoryFallback.set(value.userId, memoryValue);
+      return memoryValue;
+    }
+  }
+
+  function markIndexedDbSaved(operation) {
+    // A newer operation or retry may have been staged during the transaction.
+    if (memoryFallback.get(operation.userId) === operation) {
+      memoryFallback.set(operation.userId, { ...operation, storage: "indexeddb" });
+    }
+  }
+
+  function removeRecovery(userId, expectedOperationId) {
+    if (memoryFallback.get(userId)?.operationId === expectedOperationId) memoryFallback.delete(userId);
+    try {
+      const value = JSON.parse(localStorage.getItem(recoveryKey(userId)));
+      if (value?.userId === userId && value.operationId === expectedOperationId) localStorage.removeItem(recoveryKey(userId));
+    } catch {}
+  }
 
   function operationId() {
     if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
@@ -56,31 +107,41 @@
 
   async function read(userId) {
     if (!userId) return null;
+    const recovery = readRecovery(userId);
+    if (recovery) return recovery;
     try {
       const database = await openDatabase();
       const transaction = database.transaction(STORE_NAME, "readonly");
       const value = await requestResult(transaction.objectStore(STORE_NAME).get(userId));
       await transactionComplete(transaction);
-      return value || memoryFallback.get(userId) || null;
+      return readRecovery(userId) || (value ? { ...value, storage: "indexeddb" } : null);
     } catch {
-      return memoryFallback.get(userId) || null;
+      return readRecovery(userId);
     }
   }
 
-  async function write(operation) {
-    const memoryOperation = { ...operation, storage: "memory" };
-    memoryFallback.set(operation.userId, memoryOperation);
+  async function commit(operation, expectedRevision) {
+    const current = readRecovery(operation.userId);
+    if (current?.operationId !== operation.operationId) return null;
+    // Revisions can advance while this operation waits behind an earlier write.
+    // Preserve its snapshot but use the queue's current acknowledged revision.
+    let prepared = saveRecovery({ ...current, expectedRevision: Number.isInteger(expectedRevision) ? expectedRevision : null });
     try {
       const database = await openDatabase();
+      const latest = readRecovery(operation.userId);
+      if (latest?.operationId !== operation.operationId) return null;
+      prepared = latest;
       const transaction = database.transaction(STORE_NAME, "readwrite");
-      transaction.objectStore(STORE_NAME).put(operation);
+      transaction.objectStore(STORE_NAME).put(prepared);
       await transactionComplete(transaction);
-      memoryFallback.delete(operation.userId);
-      return { ...operation, storage: "indexeddb" };
+      markIndexedDbSaved(prepared);
+      // Keep the recovery journal until backend acknowledgement. A crash after
+      // an IndexedDB commit must not let an older queued write win on reload.
+      return { ...prepared, storage: "indexeddb" };
     } catch {
-      // The in-memory copy still lets the local backend flush this operation
-      // when IndexedDB is blocked or unavailable for the current session.
-      return memoryOperation;
+      // The synchronous journal (or memory fallback when storage is denied)
+      // still lets the backend flush this operation when IndexedDB fails.
+      return prepared;
     }
   }
 
@@ -98,18 +159,25 @@
     };
   }
 
-  function putSave(userId, invoice, expectedRevision) {
-    if (!userId || !invoice) return Promise.reject(new Error("A user and draft are required."));
-    return write(operationFor(userId, "save", invoice, expectedRevision));
+  function prepareSave(userId, invoice, expectedRevision) {
+    if (!userId || !invoice) throw new Error("A user and draft are required.");
+    return saveRecovery(operationFor(userId, "save", invoice, expectedRevision));
   }
 
-  function putDelete(userId, expectedRevision) {
-    if (!userId) return Promise.reject(new Error("A user is required."));
-    return write(operationFor(userId, "delete", null, expectedRevision));
+  function prepareDelete(userId, expectedRevision) {
+    if (!userId) throw new Error("A user is required.");
+    return saveRecovery(operationFor(userId, "delete", null, expectedRevision));
+  }
+
+  async function putSave(userId, invoice, expectedRevision) {
+    return commit(prepareSave(userId, invoice, expectedRevision), expectedRevision);
+  }
+
+  async function putDelete(userId, expectedRevision) {
+    return commit(prepareDelete(userId, expectedRevision), expectedRevision);
   }
 
   async function updateMatching(userId, expectedOperationId, updater) {
-    const memoryValue = memoryFallback.get(userId) || null;
     let database;
     let transaction;
     let store;
@@ -120,17 +188,16 @@
       store = transaction.objectStore(STORE_NAME);
       storedValue = await requestResult(store.get(userId));
     } catch {}
-    const current = storedValue || memoryValue;
+    const current = readRecovery(userId) || storedValue;
     let updated = null;
     if (current && (!expectedOperationId || current.operationId === expectedOperationId)) {
-      updated = updater(current) || current;
-      memoryFallback.set(userId, updated);
+      updated = saveRecovery(updater(current) || current);
       store?.put(updated);
     }
     if (transaction) {
       try {
         await transactionComplete(transaction);
-        if (updated) memoryFallback.delete(userId);
+        if (updated) markIndexedDbSaved(updated);
       } catch {}
     }
     return updated;
@@ -166,17 +233,17 @@
       store = transaction.objectStore(STORE_NAME);
       storedValue = await requestResult(store.get(userId));
     } catch {}
-    const current = storedValue || memoryFallback.get(userId) || null;
+    const current = readRecovery(userId) || storedValue;
     const removed = Boolean(current && (!expectedOperationId || current.operationId === expectedOperationId));
     if (removed) {
-      memoryFallback.delete(userId);
       store?.delete(userId);
     }
     if (transaction) {
       try {
         await transactionComplete(transaction);
-      } catch {}
+      } catch { return false; }
     }
+    if (removed) removeRecovery(userId, current.operationId);
     return removed;
   }
 
@@ -187,6 +254,9 @@
   window.invoiceDraftOutbox = Object.freeze({
     get: read,
     has,
+    prepareSave,
+    prepareDelete,
+    commit,
     putSave,
     putDelete,
     markRetry,

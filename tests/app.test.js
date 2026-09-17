@@ -125,8 +125,8 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     syncStatus: "Saved locally",
     storageNote: "Invoices and drafts exist only in this browser profile. Clearing site data, using private browsing, or changing devices can remove access. Download a backup regularly.",
     brandName: "Ledgerly",
-    headerLogo: "./ledgerly-mark.png?v=56",
-    invoiceLogo: "./eng-hoon-residences-logo.png?v=56",
+    headerLogo: "./ledgerly-mark.png?v=57",
+    invoiceLogo: "./eng-hoon-residences-logo.png?v=57",
     title: "Invoices | Ledgerly",
   });
 
@@ -864,13 +864,19 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     return JSON.stringify({ before, after: filename.value, checked: document.querySelector('#customizePdfFileName').checked, editable: !filename.readOnly });
   })()`));
   assert.deepEqual(persistedCustomFilename, { before: "Client custom", after: "Client custom", checked: true, editable: true });
+  await evaluate(page, "persistDraftImmediately()");
   await evaluate(page, `(() => {
+    // Simulate earlier IndexedDB work still occupying the asynchronous queue.
+    // The latest input must survive a reload before that work can complete.
+    outboxWriteQueue = new Promise(() => {});
+    window.__beforeFilenameReload = true;
     const toggle = document.querySelector('#customizePdfFileName');
     toggle.checked = false; toggle.dispatchEvent(new Event('change', { bubbles: true }));
     window.dispatchEvent(new PageTransitionEvent('pagehide'));
     location.reload();
   })()`);
-  await waitFor(() => evaluate(page, "document.readyState === 'complete' && document.querySelector('#pdfFileName').value === document.querySelector('#invoiceNumber').value && document.querySelector('#pdfFileName').readOnly"));
+  await waitFor(() => evaluate(page, "!window.__beforeFilenameReload && document.readyState === 'complete' && document.body.dataset.page === 'history'"));
+  assert.equal(await evaluate(page, "document.querySelector('#pdfFileName').value === document.querySelector('#invoiceNumber').value && document.querySelector('#pdfFileName').readOnly"), true, "the latest filename toggle must survive reload while an earlier outbox write is queued");
   await evaluate(page, "document.querySelector('#continueDraftButton').click(); true");
   const clearedFilenameBehavior = JSON.parse(await evaluate(page, `(() => {
     const number = document.querySelector('#invoiceNumber');
@@ -1725,12 +1731,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v56'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v57'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v56", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v57", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,

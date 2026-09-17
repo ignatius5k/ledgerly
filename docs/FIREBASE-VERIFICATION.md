@@ -30,9 +30,11 @@ The live test invoice was saved again as `PDF-EQUALITY-20260917` (revision 2). I
 
 ## Automated verification
 
-Current local results: **32 automated tests passed** across 12 application/infrastructure tests, 6 Firebase browser scenarios, 8 authentication/Firestore SDK tests, and 6 PDF Storage tests. Production build, production dependency audit, and whitespace checks passed.
+Current local results: **39 automated tests passed** across 19 application/infrastructure tests, 6 Firebase browser scenarios, 8 authentication/Firestore SDK tests, and 6 PDF Storage tests. Production build, production dependency audit, and whitespace checks passed.
 
 The initial GitHub run timed out in the broad application browser scenario. The harness now terminates unfinished HTTP connections when testing offline mode and bounds browser commands with diagnostic errors. Those diagnostics isolated a draft race: Clear saved draft could await an earlier save instead of its newly queued deletion, leaving the editor unchanged. A deterministic regression holds the save, queues deletion, then releases the save. The app now waits for the earlier sync and flushes the deletion before resetting the editor. Regressions also cover held HTTP requests and browser command timeout/disconnect behavior without increasing the overall test timeout.
+
+The Pages deployment check also exposed loss of the latest draft change during immediate reload. A deterministic regression blocks the existing write queue, changes the PDF filename option, and reloads before queued writes can run. Draft staging now records an account-scoped synchronous recovery journal before committing to IndexedDB. Only the matching acknowledged operation can clear it; newer edits remain recoverable.
 
 The checks found and fixed a draft revision race during overlapping sync/sign-out and added session checks that suppress late PDF downloads/print output after an account change.
 

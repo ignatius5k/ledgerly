@@ -748,11 +748,12 @@ function stageDraftSave() {
   const userId = currentUser.id;
   const snapshot = cloneInvoice(state);
   const epoch = sessionEpoch;
+  const prepared = draftOutbox.prepareSave(userId, snapshot, draftRevision);
   outboxWriteQueue = outboxWriteQueue
     .catch(() => {})
     .then(() => {
       if (epoch !== sessionEpoch || currentUser?.id !== userId) return null;
-      return draftOutbox.putSave(userId, snapshot, draftRevision);
+      return draftOutbox.commit(prepared, draftRevision);
     })
     .then((operation) => {
       if (operation && epoch === sessionEpoch && currentUser?.id === userId) {
@@ -773,11 +774,12 @@ function stageDraftDelete() {
   if (!currentUser) return Promise.resolve(null);
   const userId = currentUser.id;
   const epoch = sessionEpoch;
+  const prepared = draftOutbox.prepareDelete(userId, draftRevision);
   outboxWriteQueue = outboxWriteQueue
     .catch(() => {})
     .then(() => {
       if (epoch !== sessionEpoch || currentUser?.id !== userId) return null;
-      return draftOutbox.putDelete(userId, draftRevision);
+      return draftOutbox.commit(prepared, draftRevision);
     })
     .then((operation) => {
       if (operation && epoch === sessionEpoch && currentUser?.id === userId) setDraftSyncStatus("waiting", "Draft deletion waiting to sync");
