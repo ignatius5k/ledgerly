@@ -25,6 +25,8 @@ const TYPES = {
 };
 
 function startServer(options = {}) {
+  const emulatorPort = (name, fallback) => Number(process.env[name]?.split(":").at(-1) || fallback);
+  const emulators = { auth: emulatorPort("FIREBASE_AUTH_EMULATOR_HOST", 9099), firestore: emulatorPort("FIRESTORE_EMULATOR_HOST", 8080), storage: emulatorPort("FIREBASE_STORAGE_EMULATOR_HOST", 9199) };
   const server = createServer(async (request, response) => {
     try {
       const pathname = new URL(request.url, "http://localhost").pathname;
@@ -40,13 +42,13 @@ function startServer(options = {}) {
         body = options.firebaseConfig
           ? `window.INVOICE_FIREBASE_CONFIG = ${JSON.stringify(options.firebaseConfig)};`
           : options.firebase
-          ? 'window.INVOICE_FIREBASE_CONFIG = {apiKey:"fake-emulator-key",projectId:"demo-ledgerly",appId:"browser-test",storageBucket:"demo-ledgerly.firebasestorage.app",authDomain:"demo-ledgerly.firebaseapp.com"}; window.INVOICE_FIREBASE_EMULATORS={auth:9099,firestore:8080,storage:9199};'
+          ? `window.INVOICE_FIREBASE_CONFIG = {apiKey:"fake-emulator-key",projectId:"demo-ledgerly",appId:"browser-test",storageBucket:"demo-ledgerly.firebasestorage.app",authDomain:"demo-ledgerly.firebaseapp.com"}; window.INVOICE_FIREBASE_EMULATORS=${JSON.stringify(emulators)};`
           : 'window.INVOICE_FIREBASE_CONFIG = null;';
       }
       if (options.firebase && relativePath === "index.html") {
         body = body.toString()
-          .replace("connect-src 'self'", "connect-src 'self' http://127.0.0.1:9099 http://127.0.0.1:8080 http://127.0.0.1:9199")
-          .replace("frame-src 'self'", "frame-src 'self' http://127.0.0.1:9099");
+          .replace("connect-src 'self'", `connect-src 'self' ${Object.values(emulators).map(port => `http://127.0.0.1:${port}`).join(" ")}`)
+          .replace("frame-src 'self'", `frame-src 'self' http://127.0.0.1:${emulators.auth}`);
       }
       response.end(body);
     } catch {
@@ -54,7 +56,7 @@ function startServer(options = {}) {
       response.end("Not found");
     }
   });
-  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
+  return new Promise((resolve) => server.listen(options.port || 0, "127.0.0.1", () => resolve(server)));
 }
 
 function stopServer(server) {

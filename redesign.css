@@ -944,6 +944,8 @@
     grid-column: 1;
     grid-row: auto;
     flex-direction: row;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .invoice-record-meta {

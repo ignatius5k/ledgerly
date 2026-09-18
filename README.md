@@ -1,5 +1,7 @@
 # Ledgerly
 
+Firebase prototype branch: start the seeded demo with `npm run prototype`. See [prototype launch and verification](docs/PROTOTYPE-LAUNCH.md) for sample accounts, test results, and release limitations.
+
 An installable invoicing app for Eng Hoon Residences. Create, edit, duplicate, search, download, and print A4 invoices. Firebase Authentication provides Google sign-in, email/password accounts, and password resets; Cloud Firestore stores each account's invoice data, draft, and numbering separately; Cloud Storage stores private PDF files for saved invoice revisions.
 
 ## Run locally

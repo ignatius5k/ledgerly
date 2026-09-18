@@ -43,8 +43,10 @@ async function launchFirebaseBrowser(context) {
   return { page, read, until, socket, exceptions, profile };
 }
 
-test("Firebase browser signup, invoice save, session reload, offline draft recovery and account isolation", { timeout: 90000 }, async (context) => {
+test("Firebase mobile signup, invoice save, session reload, offline draft recovery and account isolation", { timeout: 90000 }, async (context) => {
   const { page, read, until, exceptions } = await launchFirebaseBrowser(context);
+  await page.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  assert.equal(await read("document.documentElement.scrollWidth <= innerWidth"), true, "mobile login must fit the screen");
   const email = `browser-${Date.now()}@example.test`;
   await read(`document.querySelector('#authEmail').value=${JSON.stringify(email)}; document.querySelector('#authPassword').value='Browser-test-123!'; document.querySelector('#createAccountButton').click(); true`);
   await until("!document.querySelector('#invoiceListPage').hidden");
@@ -73,6 +75,10 @@ test("Firebase browser signup, invoice save, session reload, offline draft recov
   await read("document.querySelector('#cancelOutputDialogButton').click(); location.reload(); true");
   await until("!document.querySelector('#invoiceListPage').hidden && document.querySelectorAll('.invoice-record').length===1");
   assert.match(await read("document.querySelector('.invoice-customer').textContent"), /BROWSER CUSTOMER/);
+  for (const width of [320, 390]) {
+    await page.send("Emulation.setDeviceMetricsOverride", { width, height: 844, deviceScaleFactor: 1, mobile: true });
+    assert.equal(await read("[...document.querySelectorAll('.invoice-record-actions button')].every(button => button.scrollWidth <= button.clientWidth)"), true, `${width}px invoice actions must not clip their labels`);
+  }
   await read("document.querySelector('[data-edit-invoice]').click(); true");
   await until("!document.querySelector('#editorPage').hidden && document.querySelector('#syncStatus').dataset.state==='synced'");
   await page.send("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 });
@@ -122,7 +128,7 @@ test("Google popup sign-in preserves local invoices on cancellation, imports the
   });
   const popupTarget = () => waitFor(async () => {
     const targets = await (await fetch(targetsUrl)).json();
-    return targets.find((target) => target.type === "page" && target.url.startsWith("http://127.0.0.1:9099/emulator/auth/handler"));
+    return targets.find((target) => target.type === "page" && target.url.startsWith(`http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/emulator/auth/handler`));
   }, 15000);
   async function chooseGoogle(email, reuse = false) {
     await clickGoogle();

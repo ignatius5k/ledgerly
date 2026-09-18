@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "source": "Synthetic prototype fixtures only",
+  "history": [
+    {
+      "id": "demo-invoice-1",
+      "createdAt": "2026-09-01T00:00:00.000Z",
+      "invoice": {
+        "invoiceDate": "2026-09-18",
+        "dueDate": "2026-09-25",
+        "pdfFileNameCustomized": false,
+        "invoiceNumber": "DEMO-RENTAL",
+        "pdfFileName": "DEMO-RENTAL",
+        "billTo": "DEMO — Café Tenant",
+        "items": [
+          {
+            "id": "item-0",
+            "description": "Weekend market rental",
+            "quantity": 1,
+            "price": 90
+          }
+        ]
+      }
+    },
+    {
+      "id": "demo-invoice-2",
+      "createdAt": "2026-09-01T00:00:00.000Z",
+      "invoice": {
+        "invoiceDate": "2026-09-18",
+        "dueDate": "2026-09-25",
+        "pdfFileNameCustomized": false,
+        "invoiceNumber": "DEMO-DISCOUNT",
+        "pdfFileName": "DEMO-DISCOUNT",
+        "billTo": "DEMO — Discount Customer",
+        "items": [
+          {
+            "id": "item-0",
+            "description": "Two-day pop-up rental",
+            "quantity": 2,
+            "price": 120
+          },
+          {
+            "id": "item-1",
+            "description": "Promotional discount",
+            "quantity": 1,
+            "price": -30
+          }
+        ]
+      }
+    },
+    {
+      "id": "demo-invoice-3",
+      "createdAt": "2026-09-01T00:00:00.000Z",
+      "invoice": {
+        "invoiceDate": "2026-09-18",
+        "dueDate": "2026-09-25",
+        "pdfFileNameCustomized": false,
+        "invoiceNumber": "DEMO-FIVE-LINES",
+        "pdfFileName": "DEMO-FIVE-LINES",
+        "billTo": "DEMO — Full Invoice",
+        "items": [
+          {
+            "id": "item-0",
+            "description": "Market space",
+            "quantity": 1,
+            "price": 150
+          },
+          {
+            "id": "item-1",
+            "description": "Tables",
+            "quantity": 2,
+            "price": 15
+          },
+          {
+            "id": "item-2",
+            "description": "Chairs",
+            "quantity": 4,
+            "price": 5
+          },
+          {
+            "id": "item-3",
+            "description": "Electricity",
+            "quantity": 1,
+            "price": 10
+          },
+          {
+            "id": "item-4",
+            "description": "Discount",
+            "quantity": 1,
+            "price": -10
+          }
+        ]
+      }
+    },
+    {
+      "id": "demo-invoice-4",
+      "createdAt": "2026-09-01T00:00:00.000Z",
+      "invoice": {
+        "invoiceDate": "2026-09-18",
+        "dueDate": "2026-09-25",
+        "pdfFileNameCustomized": false,
+        "invoiceNumber": "DEMO-UNICODE",
+        "pdfFileName": "DEMO-UNICODE",
+        "billTo": "DEMO — 李 / Café & Co.",
+        "items": [
+          {
+            "id": "item-0",
+            "description": "Pop-up space — **weekend booking**",
+            "quantity": 1,
+            "price": 99.99
+          }
+        ]
+      }
+    }
+  ],
+  "draft": {
+    "invoiceDate": "2026-09-18",
+    "dueDate": "2026-09-25",
+    "pdfFileNameCustomized": false,
+    "invoiceNumber": "DEMO-DRAFT",
+    "pdfFileName": "DEMO-DRAFT",
+    "billTo": "DEMO — unfinished booking",
+    "items": [
+      {
+        "id": "draft-1",
+        "description": "",
+        "quantity": "",
+        "price": ""
+      }
+    ]
+  },
+  "sequences": []
+}
