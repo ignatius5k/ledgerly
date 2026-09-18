@@ -37,7 +37,9 @@ function startServer(options = {}) {
       response.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
       let body = await readFile(filePath);
       if (relativePath === "firebase-config.js") {
-        body = options.firebase
+        body = options.firebaseConfig
+          ? `window.INVOICE_FIREBASE_CONFIG = ${JSON.stringify(options.firebaseConfig)};`
+          : options.firebase
           ? 'window.INVOICE_FIREBASE_CONFIG = {apiKey:"fake-emulator-key",projectId:"demo-ledgerly",appId:"browser-test",storageBucket:"demo-ledgerly.firebasestorage.app",authDomain:"demo-ledgerly.firebaseapp.com"}; window.INVOICE_FIREBASE_EMULATORS={auth:9099,firestore:8080,storage:9199};'
           : 'window.INVOICE_FIREBASE_CONFIG = null;';
       }

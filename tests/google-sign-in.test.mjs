@@ -38,7 +38,7 @@ test('Blocked, cancelled, denied and expired attempts can be retried; late callb
   result = s.signIn();
   const old = s.callbacks();
   s.timeout();
-  await assert.rejects(result, { code: 'auth/popup-closed-by-user' });
+  await assert.rejects(result, { code: 'auth/timeout' });
   result = s.signIn();
   old.callback({ access_token: 'stale-token' });
   s.callbacks().callback({ access_token: 'current-token' });

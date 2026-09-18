@@ -59,22 +59,22 @@ function canonicalInvoice(value) {
 
 export function createFirebaseInvoiceBackend(config, localBackend, options = {}) {
   const environment = options.environment || (typeof window !== "undefined" ? window : null);
-  const app = initializeApp(config, options.appName || "ledgerly");
-  const auth = initializeAuth(app, {
-    persistence: options.memoryAuth ? inMemoryPersistence
-      : [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence, inMemoryPersistence],
-    // Firebase pre-initializes its OAuth event iframe on Safari/iOS. Preparing
-    // it only after the click can lose the popup's return event when Safari
-    // suspends the original tab or a home-screen app during Google sign-in.
-    ...(options.memoryAuth ? {} : { popupRedirectResolver: browserPopupRedirectResolver }),
-  });
-  // Cloud invoices are kept in memory. Only unsynced drafts use the existing,
-  // account-keyed outbox, so another login cannot read a previous user's cache.
   const userAgent = environment?.navigator?.userAgent || "";
   const webKit = /AppleWebKit/i.test(userAgent) && !/(Chrome|Chromium|Edg|OPR)\//i.test(userAgent);
   const googleClientId = config.googleClientId || (config.projectId === "ledgerly-e0c95"
     ? "245799445908-rbu5tip6b78cb3l0jef49nt1mcaf27rh.apps.googleusercontent.com" : null);
-  const directGoogleSignIn = webKit && !options.emulators && googleClientId && environment?.document
+  const useDirectGoogle = webKit && !options.emulators && googleClientId && environment?.document;
+  const app = initializeApp(config, options.appName || "ledgerly");
+  const auth = initializeAuth(app, {
+    persistence: options.memoryAuth ? inMemoryPersistence
+      : [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence, inMemoryPersistence],
+    // Direct Google credentials do not need Firebase's cross-site auth iframe.
+    // Keeping the resolver here would still initialize that iframe on Safari.
+    ...(options.memoryAuth || useDirectGoogle ? {} : { popupRedirectResolver: browserPopupRedirectResolver }),
+  });
+  // Cloud invoices are kept in memory. Only unsynced drafts use the existing,
+  // account-keyed outbox, so another login cannot read a previous user's cache.
+  const directGoogleSignIn = useDirectGoogle
     ? createGoogleTokenSignIn(environment, googleClientId) : null;
   const db = initializeFirestore(app, {
     localCache: memoryLocalCache(),

@@ -136,6 +136,54 @@ test("auth startup and foreground recovery cannot overwrite a newer session or a
     assert.equal(await read("document.body.dataset.page"), replacement === "sign-out" ? "auth" : "history");
     assert.equal(await read("document.querySelector('#accountEmail').textContent"), replacement === "sign-out" ? "" : "new-account@example.test", `a pending foreground read must not undo ${replacement}`);
   }
+  await read("window.invoiceBackend.signOut()");
+  await until("document.body.dataset.page === 'auth'");
+  await read(`window.__oauthAlive = true; window.__updateRequests = 0;
+    offerServiceWorkerUpdate({ postMessage() { window.__updateRequests++; } });
+    window.invoiceBackend.signInWithGoogle = () => new Promise(resolve => { window.__finishGoogle = () => resolve({session: null}); });
+    document.querySelector('#googleSignInButton').click(); true`);
+  assert.equal(await read("document.querySelector('#updateButton').disabled"), true, "updates must not interrupt Google sign-in");
+  await read("document.querySelector('#updateButton').click(); navigator.serviceWorker.dispatchEvent(new Event('controllerchange')); new Promise(resolve => setTimeout(resolve, 200))");
+  assert.equal(await read("window.__oauthAlive === true && window.__updateRequests === 0"), true, "an update activated by another tab must not reload the OAuth opener");
+  await read("window.__finishGoogle(); new Promise(resolve => setTimeout(resolve, 0))");
+  assert.equal(await read("document.querySelector('#updateButton').disabled"), false);
+});
+
+test("Safari auth startup works with Firebase login helper domains blocked", async (context) => {
+  const chromePath = await findChromePath();
+  if (!chromePath) return context.skip("Set CHROME_PATH to run browser coverage");
+  const server = await startServer({ firebaseConfig: {
+    apiKey: "fake-bootstrap-key", projectId: "demo-ledgerly", appId: "bootstrap-test",
+    authDomain: "demo-ledgerly.firebaseapp.com", googleClientId: "test-client",
+  } });
+  const profile = await mkdtemp(join(tmpdir(), "ledgerly-safari-bootstrap-"));
+  const chrome = spawn(chromePath, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--disable-gpu", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+  context.after(async () => {
+    chrome.kill(); await stopServer(server);
+    await Promise.race([new Promise(resolve => chrome.once("exit", resolve)), new Promise(resolve => setTimeout(resolve, 1500))]);
+    await rm(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
+  });
+  let logs = "";
+  chrome.stderr.on("data", chunk => { logs += chunk; });
+  const socket = await waitFor(() => logs.match(/DevTools listening on (ws:\/\/[^\s]+)/)?.[1], 15000);
+  const targets = await (await fetch(`http://127.0.0.1:${new URL(socket).port}/json/list`)).json();
+  const page = await connectCdp(targets.find(target => target.type === "page").webSocketDebuggerUrl);
+  context.after(() => page.close());
+  await page.send("Network.enable");
+  await page.send("Network.setUserAgentOverride", { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1" });
+  await page.send("Network.setBlockedURLs", { urls: ["*firebaseapp.com/*", "*apis.google.com/*", "*accounts.google.com/*"] });
+  const helperRequests = [];
+  page.on("Network.requestWillBeSent", event => {
+    if (/firebaseapp\.com|apis\.google\.com/.test(event.request.url)) helperRequests.push(event.request.url);
+  });
+  await page.send("Page.navigate", { url: `http://127.0.0.1:${server.address().port}/` });
+  await waitFor(() => evaluate(page, "Boolean(window.invoiceBackend) && document.querySelector('#appLoadingScreen').hidden"));
+  assert.equal(await evaluate(page, "window.invoiceBackend.getSession()"), null);
+  assert.equal(await evaluate(page, "document.querySelector('#authPage').hidden"), false);
+  assert.deepEqual(helperRequests, [], "direct Google sign-in must never bootstrap Firebase's popup helper");
+  await evaluate(page, "document.querySelector('#googleSignInButton').click(); true");
+  await waitFor(() => evaluate(page, "!document.querySelector('#googleSignInButton').disabled"));
+  assert.match(await evaluate(page, "document.querySelector('#authMessage').textContent"), /Google sign-in could not load/);
 });
 
 test("guest entry, invoice editor, responsive layout, draft, print, and offline shell", async (context) => {
@@ -215,8 +263,8 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     syncStatus: "Saved locally",
     storageNote: "Invoices and drafts exist only in this browser profile. Clearing site data, using private browsing, or changing devices can remove access. Download a backup regularly.",
     brandName: "Ledgerly",
-    headerLogo: "./ledgerly-mark.png?v=60",
-    invoiceLogo: "./eng-hoon-residences-logo.png?v=60",
+    headerLogo: "./ledgerly-mark.png?v=61",
+    invoiceLogo: "./eng-hoon-residences-logo.png?v=61",
     title: "Invoices | Ledgerly",
   });
 
@@ -1873,12 +1921,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v60'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v61'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v60", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v61", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,

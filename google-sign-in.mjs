@@ -26,15 +26,17 @@ export function createGoogleTokenSignIn(environment, clientId) {
         environment.clearTimeout(timer);
         error ? reject(error) : resolve(token);
       };
-      const timer = environment.setTimeout(() => finish(authError("popup-closed-by-user", "Google sign-in timed out. Please try again.")), 120000);
+      // Allow time to complete Google's phone verification. A timeout is not
+      // a user cancellation, and must be reported as a retryable failure.
+      const timer = environment.setTimeout(() => finish(authError("timeout", "Google sign-in timed out. Return to Ledgerly and try again.")), 300000);
       try {
         const client = oauth.initTokenClient({
           client_id: clientId,
           scope: "openid email profile",
           include_granted_scopes: false,
           callback: (response) => {
-            if (response.error || !response.access_token) {
-              finish(authError(response.error === "access_denied" ? "popup-closed-by-user" : "invalid-credential", "Google sign-in was not completed."));
+            if (response?.error || typeof response?.access_token !== "string" || !response.access_token) {
+              finish(authError(response?.error === "access_denied" ? "popup-closed-by-user" : "invalid-credential", "Google sign-in was not completed."));
             } else finish(null, response.access_token);
           },
           error_callback: (error) => finish(authError(error.type === "popup_failed_to_open" ? "popup-blocked" : "popup-closed-by-user", "Google sign-in was not completed.")),

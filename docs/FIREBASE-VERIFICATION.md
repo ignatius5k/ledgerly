@@ -58,3 +58,10 @@ Two agents independently covered authentication/workspace behavior and PDF persi
 Browser coverage includes email signup/sign-in/sign-out, Google signup and returning users, cancellation and blocked popups, local invoice import, session reload, account isolation, offline draft recovery, real generated PDF upload/download, failed-upload retry, and late-response suppression after sign-out.
 
 See [deployment setup](DEPLOYMENT.md) for activation steps and [operations](OPERATIONS.md) for backup, retention, and recovery behavior.
+
+
+## Safari follow-up, 18 September 2026 (v61)
+
+The v60 direct Google flow still registered Firebase's popup resolver, which requested the old cross-site helper during Safari startup. v61 removes that dependency. A browser regression blocks Google's helper domains and verifies that Safari-mode Firebase startup completes without requesting the Firebase helper. Another regression holds Google sign-in pending and simulates another tab activating an update: the opener must survive and its Update button must stay disabled until authentication finishes. Foreground events now check for app updates without automatically reloading. Google phone-verification attempts have a five-minute limit; expiry is reported as timeout rather than cancellation.
+
+On the public Pages origin, real Google account-entry pages loaded in WebKit with both normal and simulated home-screen settings, with no origin-mismatch page or uncaught page error. This verifies the live client/origin configuration and launch, not a completed Google login on a physical iPhone. The previous live desktop attempt stopped at Google's phone verification. Physical-iPhone completion remains unverified.

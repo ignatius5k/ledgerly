@@ -151,6 +151,9 @@ let pendingAuthEmailRequestUntil = 0;
 let authEmailRequestsBlockedUntil = 0;
 let editorMode = "new";
 let waitingServiceWorker;
+let serviceWorkerUpdateRequested = false;
+let serviceWorkerRegistration;
+let serviceWorkerUpdateCheck = 0;
 let reloadingForServiceWorker = false;
 let draftStorageRefreshTimer;
 
@@ -328,6 +331,7 @@ function authFailureMessage(error, action) {
 
 function setAuthBusy(isBusy) {
   authBusy = isBusy;
+  updateButton.disabled = isBusy || serviceWorkerUpdateRequested;
   for (const button of authPage.querySelectorAll("button")) button.disabled = isBusy;
   authPage.setAttribute("aria-busy", String(isBusy));
   if (!isBusy) updateAuthEmailActions();
@@ -2935,10 +2939,16 @@ window.addEventListener("storage", (event) => {
   }
 });
 window.addEventListener("pagehide", persistDraftImmediately);
-window.addEventListener("pageshow", reconcileResumedAuthSession);
+window.addEventListener("pageshow", () => {
+  reconcileResumedAuthSession();
+  checkForAppUpdate();
+});
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") persistDraftImmediately();
-  else reconcileResumedAuthSession();
+  else {
+    reconcileResumedAuthSession();
+    checkForAppUpdate();
+  }
 });
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
@@ -2987,10 +2997,19 @@ function offerServiceWorkerUpdate(worker) {
   if (!worker) return;
   waitingServiceWorker = worker;
   updateButton.hidden = false;
+  updateButton.disabled = authBusy || serviceWorkerUpdateRequested;
+}
+
+function checkForAppUpdate() {
+  if (!serviceWorkerRegistration || navigator.onLine === false || authBusy) return;
+  if (Date.now() - serviceWorkerUpdateCheck < 60000) return;
+  serviceWorkerUpdateCheck = Date.now();
+  serviceWorkerRegistration.update().catch(() => {});
 }
 
 updateButton.addEventListener("click", () => {
-  if (!waitingServiceWorker) return;
+  if (!waitingServiceWorker || authBusy || serviceWorkerUpdateRequested) return;
+  serviceWorkerUpdateRequested = true;
   updateButton.disabled = true;
   updateButton.textContent = "Updating...";
   waitingServiceWorker.postMessage({ type: "SKIP_WAITING" });
@@ -2998,13 +3017,14 @@ updateButton.addEventListener("click", () => {
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (reloadingForServiceWorker || !waitingServiceWorker) return;
+    if (reloadingForServiceWorker || !serviceWorkerUpdateRequested) return;
     reloadingForServiceWorker = true;
     window.location.reload();
   });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js")
+    navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" })
       .then((registration) => {
+        serviceWorkerRegistration = registration;
         if (registration.waiting) offerServiceWorkerUpdate(registration.waiting);
         registration.addEventListener("updatefound", () => {
           const worker = registration.installing;
