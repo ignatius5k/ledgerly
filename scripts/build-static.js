@@ -11,8 +11,6 @@ const STATIC_FILES = [
   "redesign.css",
   "app.js",
   "backend.js",
-  "firebase-config.js",
-  "vendor/firebase-client.js",
   "outbox.js",
   "sw.js",
   "manifest.webmanifest",
@@ -42,22 +40,6 @@ async function main() {
   await rm(OUTPUT, { recursive: true, force: true });
   await mkdir(OUTPUT, { recursive: true });
   await Promise.all(STATIC_FILES.map(copyStaticFile));
-
-  let firebaseConfig;
-  if (process.env.FIREBASE_WEB_CONFIG) {
-    firebaseConfig = JSON.parse(process.env.FIREBASE_WEB_CONFIG);
-  } else {
-    try { firebaseConfig = JSON.parse(await readFile(join(ROOT, "firebase-config.local.json"), "utf8")); }
-    catch (error) { if (error.code !== "ENOENT") throw error; }
-  }
-  if (firebaseConfig) {
-    for (const key of ["apiKey", "authDomain", "projectId", "appId"]) {
-      if (typeof firebaseConfig[key] !== "string" || !firebaseConfig[key].trim()) throw new Error(`Firebase configuration is missing ${key}.`);
-    }
-    // Only the public web config belongs in the client, never service account credentials.
-    const publicConfig = Object.fromEntries(["apiKey", "authDomain", "projectId", "appId", "storageBucket", "messagingSenderId", "googleClientId"].filter((key) => firebaseConfig[key]).map((key) => [key, firebaseConfig[key]]));
-    await writeFile(join(OUTPUT, "firebase-config.js"), `window.INVOICE_FIREBASE_CONFIG = ${JSON.stringify(publicConfig, null, 2)};\n`);
-  }
 
   const headerTemplate = await readFile(join(ROOT, "deployment", "_headers.template"), "utf8");
   await writeFile(join(OUTPUT, "_headers"), headerTemplate, "utf8");

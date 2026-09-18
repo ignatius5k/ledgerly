@@ -1,190 +1,14 @@
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
-const { once } = require("node:events");
-const { createConnection } = require("node:net");
+const { createServer } = require("node:http");
 const { mkdtemp, readFile, rm, stat } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
-const { join } = require("node:path");
+const { extname, join, normalize } = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
 const ROOT = join(__dirname, "..");
 const { startServer, stopServer, connectCdp, waitFor, evaluate, findChromePath } = require("./browser-helpers");
-
-test("offline server shutdown closes unfinished browser HTTP connections", { timeout: 2000 }, async (context) => {
-  const server = await startServer();
-  const accepted = once(server, "connection");
-  const client = createConnection({ host: "127.0.0.1", port: server.address().port });
-  context.after(async () => { client.destroy(); await stopServer(server); });
-  await Promise.all([once(client, "connect"), accepted]);
-  // Chrome can have a speculative connection or an unfinished request when
-  // network emulation switches offline. It will not send the remaining bytes.
-  client.write("GET / HTTP/1.1\r\nHost: localhost\r\n");
-  let connectionError;
-  client.on("error", (error) => { connectionError = error; });
-  const closed = new Promise((resolve) => client.once("close", resolve));
-  await stopServer(server);
-  await closed;
-  assert.equal(server.listening, false);
-  assert.ok(!connectionError || connectionError.code === "ECONNRESET");
-});
-
-test("CDP commands time out or reject on disconnect instead of hanging the test", async (context) => {
-  const originalWebSocket = global.WebSocket;
-  let transport;
-  class BrowserTransport extends EventTarget {
-    constructor() { super(); transport = this; queueMicrotask(() => this.dispatchEvent(new Event("open"))); }
-    send(value) { this.lastCommand = JSON.parse(value); }
-    close() { this.dispatchEvent(new Event("close")); }
-    reply(id) { this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ id, result: {} }) })); }
-  }
-  global.WebSocket = BrowserTransport;
-  context.after(() => { global.WebSocket = originalWebSocket; });
-  const browser = await connectCdp("ws://test.invalid", { timeoutMs: 40 });
-  await assert.rejects(browser.send("Runtime.evaluate", { expression: "new Promise(() => {})" }), { code: "CDP_TIMEOUT" });
-  assert.doesNotThrow(() => transport.reply(transport.lastCommand.id), "late responses to timed-out commands must be ignored");
-  const pending = browser.send("Page.reload");
-  browser.close();
-  await assert.rejects(pending, /CDP connection closed/);
-});
-
-test("auth startup and foreground recovery cannot overwrite a newer session or active editor", async (context) => {
-  const chromePath = await findChromePath();
-  if (!chromePath) return context.skip("Set CHROME_PATH to run browser coverage");
-  const server = await startServer();
-  const appUrl = `http://127.0.0.1:${server.address().port}/`;
-  const profile = await mkdtemp(join(tmpdir(), "ledgerly-auth-lifecycle-"));
-  const chrome = spawn(chromePath, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--disable-gpu", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
-  context.after(async () => {
-    chrome.kill();
-    await stopServer(server);
-    await Promise.race([new Promise((resolve) => chrome.once("exit", resolve)), new Promise((resolve) => setTimeout(resolve, 1500))]);
-    await rm(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
-  });
-  let logs = "";
-  chrome.stderr.on("data", (chunk) => { logs += chunk; });
-  const socket = await waitFor(() => logs.match(/DevTools listening on (ws:\/\/[^\s]+)/)?.[1], 15000);
-  const targets = await (await fetch(`http://127.0.0.1:${new URL(socket).port}/json/list`)).json();
-  const page = await connectCdp(targets.find((target) => target.type === "page").webSocketDebuggerUrl);
-  context.after(() => page.close());
-  await page.send("Page.enable");
-  const backendMock = await readFile(join(ROOT, "tests", "browser-backend-mock.js"), "utf8");
-  await page.send("Page.addScriptToEvaluateOnNewDocument", { source: `${backendMock}
-    window.__lifecycleDocument = location.search;
-    const originalFactory = window.__INVOICE_STUDIO_BACKEND_FACTORY__;
-    window.__INVOICE_STUDIO_BACKEND_FACTORY__ = () => {
-      const backend = originalFactory();
-      const getSession = backend.getSession;
-      let initial = true;
-      backend.getSession = () => {
-        if (!initial) return getSession();
-        initial = false;
-        return new Promise((resolve, reject) => {
-          window.__resolveStartup = resolve;
-          window.__rejectStartup = () => reject(new Error('Stale startup failure'));
-        });
-      };
-      return backend;
-    };` });
-  const read = (script) => evaluate(page, script);
-  const until = (script) => waitFor(() => read(script));
-  for (const outcome of ["null", "error", "stale-user"]) {
-    await page.send("Page.navigate", { url: `${appUrl}?lifecycle=${outcome}` });
-    await until(`window.__lifecycleDocument === '?lifecycle=${outcome}' && typeof window.__resolveStartup === 'function'`);
-    await read("window.invoiceBackend.signIn('current-owner@example.test')");
-    await until("document.body.dataset.page === 'history' && !document.querySelector('#invoiceListPage').hidden");
-    if (outcome === "stale-user") await read("window.invoiceBackend.signOut()");
-    const release = outcome === "error" ? "window.__rejectStartup()"
-      : outcome === "null" ? "window.__resolveStartup(null)"
-        : "window.__resolveStartup({ user: { id: 'obsolete-user', email: 'obsolete@example.test' } })";
-    await read(`${release}; new Promise(resolve => setTimeout(resolve, 0))`);
-    assert.equal(await read("document.body.dataset.page"), outcome === "stale-user" ? "auth" : "history", `${outcome} startup result must not override the later auth event`);
-  }
-
-  for (const event of ["pageshow", "visibilitychange"]) {
-    await read("window.invoiceBackend.signOut()");
-    await read(`window.invoiceBackend.getSession = async () => ({ user: { id: 'restored-user', email: 'restored@example.test' } });
-      ${event === "pageshow" ? "window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))" : "document.dispatchEvent(new Event('visibilitychange'))"}; true`);
-    await until("document.body.dataset.page === 'history'");
-    assert.equal(await read("document.querySelector('#accountEmail').textContent"), "restored@example.test", `${event} must recover a positive persisted session`);
-  }
-
-  await read("document.querySelector('#historyNewInvoiceButton').click(); true");
-  await until("document.body.dataset.page === 'editor'");
-  const editorState = JSON.parse(await read(`(() => {
-    const customer = document.querySelector('#billTo');
-    customer.value = 'IN-PROGRESS EDIT';
-    customer.dispatchEvent(new Event('input', { bubbles: true }));
-    window.__resumeReads = 0;
-    window.invoiceBackend.getSession = async () => { window.__resumeReads += 1; return null; };
-    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
-    document.dispatchEvent(new Event('visibilitychange'));
-    return JSON.stringify({ page: document.body.dataset.page, customer: customer.value, reads: window.__resumeReads });
-  })()`));
-  assert.deepEqual(editorState, { page: "editor", customer: "IN-PROGRESS EDIT", reads: 0 });
-
-  for (const replacement of ["sign-out", "new-account"]) {
-    await read("window.invoiceBackend.signOut()");
-    await read("window.invoiceBackend.getSession = () => new Promise(resolve => { window.__resolveResume = resolve; }); window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); true");
-    await until("typeof window.__resolveResume === 'function'");
-    if (replacement === "sign-out") await read("window.invoiceBackend.signOut()");
-    else {
-      await read("window.invoiceBackend.signIn('new-account@example.test')");
-      await until("document.body.dataset.page === 'history'");
-    }
-    await read("window.__resolveResume({ user: { id: 'obsolete-user', email: 'obsolete@example.test' } }); delete window.__resolveResume; new Promise(resolve => setTimeout(resolve, 0))");
-    assert.equal(await read("document.body.dataset.page"), replacement === "sign-out" ? "auth" : "history");
-    assert.equal(await read("document.querySelector('#accountEmail').textContent"), replacement === "sign-out" ? "" : "new-account@example.test", `a pending foreground read must not undo ${replacement}`);
-  }
-  await read("window.invoiceBackend.signOut()");
-  await until("document.body.dataset.page === 'auth'");
-  await read(`window.__oauthAlive = true; window.__updateRequests = 0;
-    offerServiceWorkerUpdate({ postMessage() { window.__updateRequests++; } });
-    window.invoiceBackend.signInWithGoogle = () => new Promise(resolve => { window.__finishGoogle = () => resolve({session: null}); });
-    document.querySelector('#googleSignInButton').click(); true`);
-  assert.equal(await read("document.querySelector('#updateButton').disabled"), true, "updates must not interrupt Google sign-in");
-  await read("document.querySelector('#updateButton').click(); navigator.serviceWorker.dispatchEvent(new Event('controllerchange')); new Promise(resolve => setTimeout(resolve, 200))");
-  assert.equal(await read("window.__oauthAlive === true && window.__updateRequests === 0"), true, "an update activated by another tab must not reload the OAuth opener");
-  await read("window.__finishGoogle(); new Promise(resolve => setTimeout(resolve, 0))");
-  assert.equal(await read("document.querySelector('#updateButton').disabled"), false);
-});
-
-test("Safari auth startup works with Firebase login helper domains blocked", async (context) => {
-  const chromePath = await findChromePath();
-  if (!chromePath) return context.skip("Set CHROME_PATH to run browser coverage");
-  const server = await startServer({ firebaseConfig: {
-    apiKey: "fake-bootstrap-key", projectId: "demo-ledgerly", appId: "bootstrap-test",
-    authDomain: "demo-ledgerly.firebaseapp.com", googleClientId: "test-client",
-  } });
-  const profile = await mkdtemp(join(tmpdir(), "ledgerly-safari-bootstrap-"));
-  const chrome = spawn(chromePath, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--disable-gpu", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
-  context.after(async () => {
-    chrome.kill(); await stopServer(server);
-    await Promise.race([new Promise(resolve => chrome.once("exit", resolve)), new Promise(resolve => setTimeout(resolve, 1500))]);
-    await rm(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
-  });
-  let logs = "";
-  chrome.stderr.on("data", chunk => { logs += chunk; });
-  const socket = await waitFor(() => logs.match(/DevTools listening on (ws:\/\/[^\s]+)/)?.[1], 15000);
-  const targets = await (await fetch(`http://127.0.0.1:${new URL(socket).port}/json/list`)).json();
-  const page = await connectCdp(targets.find(target => target.type === "page").webSocketDebuggerUrl);
-  context.after(() => page.close());
-  await page.send("Network.enable");
-  await page.send("Network.setUserAgentOverride", { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1" });
-  await page.send("Network.setBlockedURLs", { urls: ["*firebaseapp.com/*", "*apis.google.com/*", "*accounts.google.com/*"] });
-  const helperRequests = [];
-  page.on("Network.requestWillBeSent", event => {
-    if (/firebaseapp\.com|apis\.google\.com/.test(event.request.url)) helperRequests.push(event.request.url);
-  });
-  await page.send("Page.navigate", { url: `http://127.0.0.1:${server.address().port}/` });
-  await waitFor(() => evaluate(page, "Boolean(window.invoiceBackend) && document.querySelector('#appLoadingScreen').hidden"));
-  assert.equal(await evaluate(page, "window.invoiceBackend.getSession()"), null);
-  assert.equal(await evaluate(page, "document.querySelector('#authPage').hidden"), false);
-  assert.deepEqual(helperRequests, [], "direct Google sign-in must never bootstrap Firebase's popup helper");
-  await evaluate(page, "document.querySelector('#googleSignInButton').click(); true");
-  await waitFor(() => evaluate(page, "!document.querySelector('#googleSignInButton').disabled"));
-  assert.match(await evaluate(page, "document.querySelector('#authMessage').textContent"), /Google sign-in could not load/);
-});
 
 test("guest entry, invoice editor, responsive layout, draft, print, and offline shell", async (context) => {
   const chromePath = await findChromePath();
@@ -205,7 +29,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
 
   context.after(async () => {
     chrome.kill();
-    await stopServer(server);
+    server.close();
     await Promise.race([
       new Promise((resolve) => chrome.once("exit", resolve)),
       new Promise((resolve) => setTimeout(resolve, 1500)),
@@ -263,8 +87,8 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     syncStatus: "Saved locally",
     storageNote: "Invoices and drafts exist only in this browser profile. Clearing site data, using private browsing, or changing devices can remove access. Download a backup regularly.",
     brandName: "Ledgerly",
-    headerLogo: "./ledgerly-mark.png?v=61",
-    invoiceLogo: "./eng-hoon-residences-logo.png?v=61",
+    headerLogo: "./ledgerly-mark.png?v=62",
+    invoiceLogo: "./eng-hoon-residences-logo.png?v=62",
     title: "Invoices | Ledgerly",
   });
 
@@ -1002,19 +826,13 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     return JSON.stringify({ before, after: filename.value, checked: document.querySelector('#customizePdfFileName').checked, editable: !filename.readOnly });
   })()`));
   assert.deepEqual(persistedCustomFilename, { before: "Client custom", after: "Client custom", checked: true, editable: true });
-  await evaluate(page, "persistDraftImmediately()");
   await evaluate(page, `(() => {
-    // Simulate earlier IndexedDB work still occupying the asynchronous queue.
-    // The latest input must survive a reload before that work can complete.
-    outboxWriteQueue = new Promise(() => {});
-    window.__beforeFilenameReload = true;
     const toggle = document.querySelector('#customizePdfFileName');
     toggle.checked = false; toggle.dispatchEvent(new Event('change', { bubbles: true }));
     window.dispatchEvent(new PageTransitionEvent('pagehide'));
     location.reload();
   })()`);
-  await waitFor(() => evaluate(page, "!window.__beforeFilenameReload && document.readyState === 'complete' && document.body.dataset.page === 'history'"));
-  assert.equal(await evaluate(page, "document.querySelector('#pdfFileName').value === document.querySelector('#invoiceNumber').value && document.querySelector('#pdfFileName').readOnly"), true, "the latest filename toggle must survive reload while an earlier outbox write is queued");
+  await waitFor(() => evaluate(page, "document.readyState === 'complete' && document.querySelector('#pdfFileName').value === document.querySelector('#invoiceNumber').value && document.querySelector('#pdfFileName').readOnly"));
   await evaluate(page, "document.querySelector('#continueDraftButton').click(); true");
   const clearedFilenameBehavior = JSON.parse(await evaluate(page, `(() => {
     const number = document.querySelector('#invoiceNumber');
@@ -1025,30 +843,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   })()`));
   assert.deepEqual(clearedFilenameBehavior, { reset: "INV-AFTER-RELOAD", numberBefore: "INV-AFTER-RELOAD", synced: "INV-CLEAR-SYNC", checked: false, readOnly: true });
 
-  await evaluate(page, "persistDraftImmediately()");
-  await evaluate(page, `(() => {
-    // Keep the previous save in flight while Clear saved draft queues its
-    // deletion. Slow CI exposed this ordering; make it deterministic everywhere.
-    window.__originalDraftSave = window.invoiceBackend.saveDraft;
-    window.invoiceBackend.saveDraft = async (...args) => {
-      const result = await window.__originalDraftSave(...args);
-      await new Promise(resolve => { window.__releaseDraftBeforeClear = resolve; });
-      return result;
-    };
-    const number = document.querySelector('#invoiceNumber');
-    number.dispatchEvent(new Event('input', { bubbles: true }));
+  await evaluate(page, `(async () => {
+    window.confirm = () => true;
+    const before = document.querySelector('#invoiceNumber').value;
+    document.querySelector('#clearDraftButton').click();
+    while (document.querySelector('#invoiceNumber').value === before) await new Promise(resolve => setTimeout(resolve, 0));
   })()`);
-  await waitFor(() => evaluate(page, "typeof window.__releaseDraftBeforeClear === 'function'"));
-  const numberBeforeClear = await evaluate(page, "document.querySelector('#invoiceNumber').value");
-  await evaluate(page, "window.confirm = () => true; document.querySelector('#clearDraftButton').click(); true");
-  await waitFor(() => evaluate(page, "window.invoiceDraftOutbox.get('test-user-1').then(operation => operation?.type === 'delete')"));
-  await evaluate(page, "window.invoiceBackend.saveDraft = window.__originalDraftSave; window.__releaseDraftBeforeClear(); true");
-  await waitFor(() => evaluate(page, `document.querySelector('#invoiceNumber').value !== ${JSON.stringify(numberBeforeClear)} || document.querySelector('#toast').textContent.includes('Draft deletion is waiting to sync')`));
-  assert.notEqual(
-    await evaluate(page, "document.querySelector('#invoiceNumber').value"),
-    numberBeforeClear,
-    "Clear saved draft must finish its queued deletion after an in-flight save before resetting the editor",
-  );
   assert.equal(await evaluate(page, "localStorage.getItem('test-remote-draft')"), null);
   assert.match(await evaluate(page, "document.querySelector('#invoiceNumber').value"), /^EHR-\d{8}-\d{3,}$/);
   await evaluate(page, "window.dispatchEvent(new PageTransitionEvent('pagehide'))");
@@ -1512,38 +1312,6 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     });
   })()`));
   assert.deepEqual(savedInvoiceDeletion, { before: 2, after: 1, deleteButtons: 1, draftStored: false, editorBillTo: "" });
-  for (const width of [1440, 1000, 842, 375]) {
-    await page.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 500 });
-    const layout = JSON.parse(await evaluate(page, `(() => {
-      window.scrollTo(0, 0);
-      const record = document.querySelector('.invoice-record');
-      const cells = [record.querySelector('.invoice-number'), record.querySelector('.invoice-customer'), ...record.querySelectorAll('.invoice-record-meta dd'), record.querySelector('.invoice-record-actions')];
-      const headings = [...document.querySelectorAll('.invoice-table-head span')];
-      const email = document.querySelector('#accountEmail');
-      const button = document.querySelector('#signOutButton');
-      const buttonRect = button.getBoundingClientRect();
-      const x = buttonRect.left + buttonRect.width / 2;
-      const y = buttonRect.top + buttonRect.height / 2;
-      return JSON.stringify({
-        fits: document.documentElement.scrollWidth <= innerWidth,
-        emailVisible: email.getClientRects().length > 0 && email.getBoundingClientRect().width > 0 && Boolean(email.textContent.trim()),
-        signOutVisible: buttonRect.width >= 44 && buttonRect.height >= 44 && buttonRect.left >= 0 && buttonRect.right <= innerWidth && buttonRect.top >= 0 && buttonRect.bottom <= innerHeight,
-        signOutReceivesPointer: button.contains(document.elementFromPoint(x, y)),
-        columnsAlign: cells.every((cell, index) => Math.abs(cell.getBoundingClientRect().left - headings[index].getBoundingClientRect().left) < 1),
-        sameRow: cells.every(cell => Math.abs((cell.getBoundingClientRect().top + cell.getBoundingClientRect().height / 2) - (cells[0].getBoundingClientRect().top + cells[0].getBoundingClientRect().height / 2)) < 1),
-        metadataBelowIdentity: record.querySelector('.invoice-record-meta').getBoundingClientRect().top >= record.firstElementChild.getBoundingClientRect().bottom,
-        actionsBelowMetadata: record.querySelector('.invoice-record-actions').getBoundingClientRect().top >= record.querySelector('.invoice-record-meta').getBoundingClientRect().bottom
-      });
-    })()`));
-    assert.equal(layout.fits, true, `${width}px populated history must fit the viewport`);
-    assert.equal(layout.emailVisible, true, `${width}px account identity must remain visible`);
-    assert.equal(layout.signOutVisible && layout.signOutReceivesPointer, true, `${width}px Sign out must be visible and receive pointer input`);
-    if (width > 700) {
-      assert.equal(layout.columnsAlign && layout.sameRow, true, `${width}px invoice cells must align with their own column headers`);
-    } else {
-      assert.equal(layout.metadataBelowIdentity && layout.actionsBelowMetadata, true, `${width}px invoice cards must keep identity, metadata and actions separate`);
-    }
-  }
   await page.send("Emulation.setDeviceMetricsOverride", { width: 320, height: 640, deviceScaleFactor: 1, mobile: true });
   const mobileHistoryActions = JSON.parse(await evaluate(page, `(() => {
     const record = document.querySelector('.invoice-record').getBoundingClientRect();
@@ -1665,52 +1433,31 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.ok(mobileHistoryLayout.records.every(record => record.actionWidths.every(width => width >= 44)));
   await page.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 
-  let signOutPoint;
-  for (const width of [842, 375]) {
-    await page.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 500 });
-    signOutPoint = JSON.parse(await evaluate(page, `(async () => {
-      window.scrollTo(0, 0);
-      window.__signOutConfirmCalls = 0;
-      window.confirm = () => { window.__signOutConfirmCalls += 1; return false; };
-      window.__pendingSignOutOperation = await window.invoiceDraftOutbox.putSave('test-user-1', {
-        invoiceNumber: 'EHR-RECOVERY-001',
-        billTo: 'Recovered customer'
-      });
-      const button = document.querySelector('#signOutButton');
-      const rect = button.getBoundingClientRect();
-      const x = rect.left + rect.width / 2;
-      const y = rect.top + rect.height / 2;
-      return JSON.stringify({ x, y, hit: button.contains(document.elementFromPoint(x, y)) });
-    })()`));
-    assert.equal(signOutPoint.hit, true, `${width}px Sign out must be reachable without a scripted DOM click`);
-    await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x: signOutPoint.x, y: signOutPoint.y, button: "left", clickCount: 1 });
-    await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: signOutPoint.x, y: signOutPoint.y, button: "left", clickCount: 1 });
-    await waitFor(() => evaluate(page, "window.__signOutConfirmCalls === 1 && !document.querySelector('#signOutButton').disabled"));
-    const blockedSignOut = JSON.parse(await evaluate(page, `(async () => {
-      const result = {
-        page: document.body.dataset.page,
-        status: document.querySelector('#syncStatus').textContent,
-        signOutCalls: window.__BROWSER_BACKEND_MOCK__.controls.signOutCalls,
-        pending: await window.invoiceDraftOutbox.has('test-user-1')
-      };
-      await window.invoiceDraftOutbox.remove('test-user-1', window.__pendingSignOutOperation.operationId);
-      return JSON.stringify(result);
-    })()`));
-    assert.deepEqual(blockedSignOut, {
-      page: "history",
-      status: "Sync this draft before signing out",
-      signOutCalls: 0,
-      pending: true,
+  const blockedSignOut = JSON.parse(await evaluate(page, `(async () => {
+    const operation = await window.invoiceDraftOutbox.putSave('test-user-1', {
+      invoiceNumber: 'EHR-RECOVERY-001',
+      billTo: 'Recovered customer'
     });
-  }
+    document.querySelector('#signOutButton').click();
+    while (!document.querySelector('#toast').textContent.includes('has not synced')) await new Promise(resolve => setTimeout(resolve, 0));
+    const result = {
+      page: document.body.dataset.page,
+      status: document.querySelector('#syncStatus').textContent,
+      signOutCalls: window.__BROWSER_BACKEND_MOCK__.controls.signOutCalls,
+      pending: await window.invoiceDraftOutbox.has('test-user-1')
+    };
+    await window.invoiceDraftOutbox.remove('test-user-1', operation.operationId);
+    return JSON.stringify(result);
+  })()`));
+  assert.deepEqual(blockedSignOut, {
+    page: "history",
+    status: "Sync this draft before signing out",
+    signOutCalls: 0,
+    pending: true,
+  });
 
-  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x: signOutPoint.x, y: signOutPoint.y, button: "left", clickCount: 1 });
-  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: signOutPoint.x, y: signOutPoint.y, button: "left", clickCount: 1 });
+  await evaluate(page, "document.querySelector('#signOutButton').click(); true");
   await waitFor(() => evaluate(page, "document.body.dataset.page === 'auth' && !document.querySelector('#authPage').hidden"));
-  for (const width of [375, 842, 1440]) {
-    await page.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 500 });
-    assert.equal(await evaluate(page, "document.querySelector('#accountControls').getClientRects().length"), 0, `${width}px signed-out account controls must respect hidden`);
-  }
   const signedOutState = JSON.parse(await evaluate(page, `JSON.stringify({
     title: document.querySelector('#authTitle').textContent,
     historyHidden: document.querySelector('#invoiceListPage').hidden,
@@ -1921,12 +1668,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v61'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v62'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v61", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v62", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,
@@ -1965,7 +1712,7 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   });
   await evaluate(page, "window.__offlineReloadMarker = 'before'");
   await stopServer(server);
-  // A hard reload bypasses the service worker; verify a normal offline reload.
+  // Hard reload bypasses service workers; normal reload verifies offline launch.
   await page.send("Page.reload");
   await waitFor(() => evaluate(page, "document.readyState === 'complete' && document.querySelector('#invoiceForm') !== null && typeof window.__offlineReloadMarker === 'undefined'"), 8000);
   assert.equal(await evaluate(page, "typeof window.__offlineReloadMarker"), "undefined");

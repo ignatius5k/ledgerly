@@ -30,9 +30,6 @@ const updateButton = document.querySelector("#updateButton");
 const offlineBanner = document.querySelector("#offlineBanner");
 const outputDialog = document.querySelector("#outputDialog");
 const outputFileName = document.querySelector("#outputFileName");
-const cloudPdfPanel = document.querySelector("#cloudPdfPanel");
-const cloudPdfStatus = document.querySelector("#cloudPdfStatus");
-const retryCloudPdfButton = document.querySelector("#retryCloudPdfButton");
 const savePdfButton = document.querySelector("#savePdfButton");
 const savePdfButtonLabel = document.querySelector("#savePdfButtonLabel");
 const printNowButton = document.querySelector("#printNowButton");
@@ -66,13 +63,11 @@ const draftNotice = document.querySelector("#draftNotice");
 const draftNoticeSummary = document.querySelector("#draftNoticeSummary");
 const authPage = document.querySelector("#authPage");
 const authConfigurationState = document.querySelector("#authConfigurationState");
-const workspaceErrorState = document.querySelector("#workspaceErrorState");
 const authSignInState = document.querySelector("#authSignInState");
 const authForm = document.querySelector("#authForm");
 const authEmail = document.querySelector("#authEmail");
 const authPassword = document.querySelector("#authPassword");
 const authMessage = document.querySelector("#authMessage");
-const googleSignInButton = document.querySelector("#googleSignInButton");
 const createAccountButton = document.querySelector("#createAccountButton");
 const forgotPasswordButton = document.querySelector("#forgotPasswordButton");
 const passwordRecoveryForm = document.querySelector("#passwordRecoveryForm");
@@ -116,9 +111,7 @@ let installPrompt;
 let draftPersistenceEnabled = true;
 let draftChanged = false;
 let outputBusy = false;
-let invoiceSaving = false;
 let outputDialogTrigger;
-let outputPdfContext;
 let currentPage = "history";
 let historyQuery = "";
 let historyNextCursor;
@@ -136,7 +129,6 @@ let draftSaveVersion = 0;
 let draftRevision;
 let draftWriteAbortController = new AbortController();
 let sessionEpoch = 0;
-let authStateVersion = 0;
 let pendingLegacyMigration;
 let resolveLegacyMigration;
 let draftRetryTimer;
@@ -151,9 +143,6 @@ let pendingAuthEmailRequestUntil = 0;
 let authEmailRequestsBlockedUntil = 0;
 let editorMode = "new";
 let waitingServiceWorker;
-let serviceWorkerUpdateRequested = false;
-let serviceWorkerRegistration;
-let serviceWorkerUpdateCheck = 0;
 let reloadingForServiceWorker = false;
 let draftStorageRefreshTimer;
 
@@ -166,7 +155,6 @@ function normalizeInvoiceData(value) {
     : Boolean(savedPdfFileName && savedPdfFileName !== invoiceNumber);
   return {
     historyId: typeof value.historyId === "string" ? value.historyId.slice(0, 160) : undefined,
-    historyRevision: Number.isInteger(value.historyRevision) ? value.historyRevision : undefined,
     draftDirty: Boolean(value.draftDirty),
     invoiceNumber,
     pdfFileName: pdfFileNameCustomized
@@ -276,37 +264,6 @@ function authEmailRetrySeconds(error) {
 
 function authFailureMessage(error, action) {
   const code = String(error?.code || "");
-  const firebaseMessages = {
-    "auth/invalid-credential": action === "google-sign-in"
-      ? "Google could not verify this sign-in. Please try again."
-      : "The email or password is incorrect.",
-    "auth/invalid-login-credentials": "The email or password is incorrect.",
-    "auth/wrong-password": "The email or password is incorrect.",
-    "auth/user-not-found": "The email or password is incorrect.",
-    "auth/email-already-in-use": "An account already uses this email. Sign in or reset your password.",
-    "auth/invalid-email": "Enter a valid email address.",
-    "auth/weak-password": "Choose a password with at least 6 characters.",
-    "auth/password-does-not-meet-requirements": "Choose a stronger password that meets your account's password requirements.",
-    "auth/too-many-requests": "Too many attempts. Wait a few minutes before trying again.",
-    "auth/network-request-failed": "Check your internet connection and try again.",
-    "auth/user-disabled": "This account has been disabled. Contact the app administrator.",
-    "auth/operation-not-allowed": action === "google-sign-in"
-      ? "Google sign-in is not enabled yet. Use email sign-in or contact the app administrator."
-      : "Email sign-in is not enabled yet. Contact the app administrator.",
-    "auth/popup-blocked": "Your browser blocked the Google sign-in window. Allow pop-ups for this site, then try again.",
-    "auth/popup-closed-by-user": "Google sign-in was cancelled. You can try again when ready.",
-    "auth/cancelled-popup-request": "Google sign-in was interrupted. Please try again.",
-    "auth/unauthorized-domain": "Google sign-in is not available on this website address yet. Contact the app administrator.",
-    "auth/invalid-oauth-client-id": "Google sign-in is not configured correctly. Contact the app administrator.",
-    "auth/operation-not-supported-in-this-environment": "Open Ledgerly in a regular browser to sign in with Google.",
-    "auth/web-storage-unsupported": "Your browser must allow site storage to sign in with Google. Check your browser settings and try again.",
-    "auth/account-exists-with-different-credential": "This email already has an account using another sign-in method. Use that method to access your existing invoices.",
-    "auth/invalid-api-key": "The account connection is not configured correctly. Contact the app administrator.",
-    "auth/expired-action-code": "This reset link has expired. Request a new password reset email.",
-    "auth/invalid-action-code": "This reset link is invalid or already used. Request a new password reset email.",
-    "auth/requires-recent-login": "Sign in again before changing your password.",
-  };
-  if (firebaseMessages[code]) return firebaseMessages[code];
   if (code === "email_not_confirmed") {
     return "Confirm your email before signing in. Use the newest confirmation email, then return here.";
   }
@@ -331,7 +288,6 @@ function authFailureMessage(error, action) {
 
 function setAuthBusy(isBusy) {
   authBusy = isBusy;
-  updateButton.disabled = isBusy || serviceWorkerUpdateRequested;
   for (const button of authPage.querySelectorAll("button")) button.disabled = isBusy;
   authPage.setAttribute("aria-busy", String(isBusy));
   if (!isBusy) updateAuthEmailActions();
@@ -369,8 +325,6 @@ function finishLegacyMigrationPrompt(action) {
 
 function clearSensitiveWorkspace() {
   neutralizeDraftWrites();
-  clearOutputPdfContext();
-  setOutputBusy(false);
   invoiceHistory = [];
   historyNextCursor = undefined;
   historyTotal = 0;
@@ -408,14 +362,12 @@ function hideWorkspace() {
 
 function showSignedOutPage() {
   currentUser = undefined;
-  workspaceLoading = false;
   clearSensitiveWorkspace();
   hideWorkspace();
   accountControls.hidden = true;
   storageRecoveryPage.hidden = true;
   authPage.hidden = false;
   authConfigurationState.hidden = true;
-  workspaceErrorState.hidden = true;
   authSignInState.hidden = false;
   passwordRecoveryForm.hidden = true;
   authPage.setAttribute("aria-labelledby", "authTitle");
@@ -433,13 +385,12 @@ function showConfigurationPage() {
   storageRecoveryPage.hidden = true;
   authPage.hidden = false;
   authConfigurationState.hidden = false;
-  workspaceErrorState.hidden = true;
   authSignInState.hidden = true;
   passwordRecoveryForm.hidden = true;
   authPage.setAttribute("aria-labelledby", "configurationTitle");
   document.body.dataset.page = "auth";
   document.title = "Connect account | Ledgerly";
-  setAuthMessage(backend?.configurationError || "", "error");
+  setAuthMessage();
 }
 
 function showPasswordRecoveryPage() {
@@ -447,7 +398,6 @@ function showPasswordRecoveryPage() {
   storageRecoveryPage.hidden = true;
   authPage.hidden = false;
   authConfigurationState.hidden = true;
-  workspaceErrorState.hidden = true;
   authSignInState.hidden = true;
   passwordRecoveryForm.hidden = false;
   authPage.setAttribute("aria-labelledby", "recoveryTitle");
@@ -461,18 +411,10 @@ function legacyStorageData() {
   const hasLegacyDraft = localStorage.getItem(STORAGE_KEY) !== null;
   const hasLegacyHistory = localStorage.getItem(HISTORY_KEY) !== null;
   const hasLegacySequence = localStorage.getItem(SEQUENCE_KEY) !== null;
-  const records = loadLegacyInvoiceHistory();
-  const draft = loadLegacyDraft();
-  let importable = true;
-  try {
-    const rawHistory = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
-    importable = Array.isArray(rawHistory) && rawHistory.length === records.length
-      && (!hasLegacyDraft || Boolean(draft)) && !localStorage.getItem(RESTORE_JOURNAL_KEY);
-  } catch { importable = false; }
   return {
     present: hasLegacyDraft || hasLegacyHistory || hasLegacySequence,
-    draft, records, importable,
-    sequence: legacyExportValue(SEQUENCE_KEY),
+    draft: loadLegacyDraft(),
+    records: loadLegacyInvoiceHistory(),
   };
 }
 
@@ -480,7 +422,6 @@ function clearLegacyStorage() {
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(HISTORY_KEY);
   localStorage.removeItem(SEQUENCE_KEY);
-  localStorage.removeItem(DRAFT_REVISION_KEY);
 }
 
 function legacyExportValue(key) {
@@ -546,32 +487,6 @@ function downloadLocalBackup(options = {}) {
   }
 }
 
-async function downloadWorkspaceBackup() {
-  if (backend.guestMode) return downloadLocalBackup();
-  const uid = currentUser?.id;
-  exportDataButton.disabled = true;
-  try {
-    const backup = await backend.exportAccountData(uid);
-    if (currentUser?.id !== uid) return;
-    if (hasUnsavedDraft()) {
-      backup.draft = cloneInvoice(state);
-      backup.draftRevision = draftRevision ?? null;
-      backup.openTabDraftIncluded = true;
-    }
-    const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `ledgerly-account-backup-${isoDate(new Date())}.json`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    showToast("Account backup downloaded.");
-  } catch (error) {
-    if (currentUser?.id === uid) showToast(error?.message || "The account backup could not be downloaded.");
-  } finally { exportDataButton.disabled = false; }
-}
-
 function exportLegacyBrowserData() {
   try {
     downloadLocalBackup({ migration: true });
@@ -591,15 +506,8 @@ async function restoreBackupFile(event) {
   if (!file) return;
   try {
     const backup = JSON.parse(await file.text());
-    if (!backend.guestMode && currentUser) {
-      if (!Array.isArray(backup.history) || (backup.draft && !Array.isArray(backup.draft.items))) throw new Error("Choose a valid Ledgerly backup file.");
-      if (!window.confirm("Import this backup into your signed-in account? Existing invoices will be preserved.")) return;
-      await persistDraftImmediately();
-      await backend.migrateLocalData(currentUser.id, backup.history, backup.draft, backup.sequences || (backup.sequence ? [backup.sequence] : []));
-    } else {
-      if (typeof backend.restoreLocalData !== "function") throw new Error("Backup restore is unavailable in this build.");
-      backend.restoreLocalData(backup);
-    }
+    if (typeof backend.restoreLocalData !== "function") throw new Error("Backup restore is unavailable in this build.");
+    backend.restoreLocalData(backup);
     if (currentUser) await draftOutbox.remove(currentUser.id);
     showToast("Backup restored. Reloading your invoices...");
     window.setTimeout(() => window.location.reload(), 250);
@@ -661,8 +569,7 @@ function promptForLegacyMigration(session) {
   legacyMigrationMessage.textContent = "Nothing has been moved yet.";
   legacyMigrationMessage.removeAttribute("data-state");
   setLegacyMigrationBusy(false);
-  moveLegacyDataButton.disabled = !legacy.importable || (invoiceCount === 0 && !legacy.draft);
-  if (!legacy.importable) legacyMigrationMessage.textContent = "Some local records need recovery. Download a backup before changing this browser's data, or use your account without importing.";
+  moveLegacyDataButton.disabled = invoiceCount === 0 && !legacy.draft;
   legacyMigrationDialog.showModal();
   return new Promise((resolve) => {
     resolveLegacyMigration = resolve;
@@ -670,18 +577,15 @@ function promptForLegacyMigration(session) {
 }
 
 async function moveLegacyBrowserData() {
-  if (!pendingLegacyMigration?.importable) return;
-  const migration = pendingLegacyMigration;
+  if (!pendingLegacyMigration) return;
   setLegacyMigrationBusy(true);
   legacyMigrationMessage.textContent = "Moving the selected local data...";
   try {
     await backend.migrateLocalData(
-      migration.userId,
-      migration.records,
-      migration.draft,
-      migration.sequence ? [migration.sequence] : [],
+      pendingLegacyMigration.userId,
+      pendingLegacyMigration.records,
+      pendingLegacyMigration.draft,
     );
-    if (currentUser?.id !== migration.userId || pendingLegacyMigration !== migration) return;
     clearLegacyStorage();
     finishLegacyMigrationPrompt("moved");
   } catch (error) {
@@ -692,7 +596,6 @@ async function moveLegacyBrowserData() {
 }
 
 function discardLegacyBrowserData() {
-  if (!window.confirm("Permanently discard this browser's local invoices and draft? Download a backup first.")) return;
   clearLegacyStorage();
   finishLegacyMigrationPrompt("discarded");
 }
@@ -848,10 +751,8 @@ async function handleDraftConflict(operation) {
 async function runDraftOutboxSync(force = false) {
   if (!currentUser) return true;
   const userId = currentUser.id;
-  const epoch = sessionEpoch;
   await outboxWriteQueue.catch(() => {});
   const operation = await draftOutbox.get(userId);
-  if (epoch !== sessionEpoch || currentUser?.id !== userId) return false;
   if (!operation) {
     setDraftSyncStatus("synced", "All changes synced");
     return true;
@@ -873,24 +774,19 @@ async function runDraftOutboxSync(force = false) {
       ? await backend.deleteDraft(userId, undefined, expectedRevision)
       : await backend.saveDraft(userId, operation.invoice, undefined, expectedRevision);
     const nextRevision = operation.type === "delete" ? undefined : result?.revision;
-    if (epoch !== sessionEpoch || currentUser?.id !== userId) return false;
-    // A later local edit may already be waiting in the outbox. Publish our
-    // successful write's revision before any more asynchronous outbox work so
-    // subsequent stages cannot overwrite a rebased operation with a stale base.
-    draftRevision = nextRevision;
     await draftOutbox.remove(userId, operation.operationId);
     const newerOperation = await draftOutbox.get(userId);
-    if (epoch !== sessionEpoch || currentUser?.id !== userId) return false;
     if (newerOperation && newerOperation.operationId !== operation.operationId) {
       await draftOutbox.rebase(userId, newerOperation.operationId, nextRevision);
       scheduleDraftRetry(0);
       setDraftSyncStatus("waiting", "Saved on this device. Waiting to sync");
     } else {
+      draftRevision = nextRevision;
       const time = new Intl.DateTimeFormat("en-SG", { hour: "numeric", minute: "2-digit" }).format(new Date());
       setDraftSyncStatus("synced", `Synced ${time}`);
       if (!state.historyId) {
         saveStatus.textContent = editorMode === "duplicate"
-          ? (backend.provider === "firebase" ? "Duplicate draft synced. Not in history." : "Duplicate draft saved locally. Not in history.")
+          ? "Duplicate draft saved locally. Not in history."
           : `Draft saved ${time}`;
       } else {
         saveStatus.textContent = `Saved ${time}`;
@@ -898,7 +794,6 @@ async function runDraftOutboxSync(force = false) {
     }
     return true;
   } catch (error) {
-    if (epoch !== sessionEpoch || currentUser?.id !== userId) return false;
     if (error?.code === "DRAFT_REVISION_CONFLICT") {
       await handleDraftConflict(operation);
       return false;
@@ -917,11 +812,10 @@ async function runDraftOutboxSync(force = false) {
 
 function flushDraftOutbox(options = {}) {
   if (draftSyncPromise) return draftSyncPromise;
-  const pendingSync = runDraftOutboxSync(Boolean(options.force))
+  draftSyncPromise = runDraftOutboxSync(Boolean(options.force))
     .finally(() => {
-      if (draftSyncPromise === pendingSync) draftSyncPromise = undefined;
+      draftSyncPromise = undefined;
     });
-  draftSyncPromise = pendingSync;
   return draftSyncPromise;
 }
 
@@ -1044,57 +938,42 @@ async function loadInvoiceHistory(options = {}) {
 }
 
 async function loadAuthenticatedWorkspace(session) {
-  if (!session?.user || (workspaceLoading && currentUser?.id === session.user.id)) return;
+  if (!session?.user || workspaceLoading) return;
   if (currentUser?.id === session.user.id && !invoiceListPage.hidden) return;
-  if (currentUser?.id && currentUser.id !== session.user.id) clearSensitiveWorkspace();
   workspaceLoading = true;
+  if (currentUser?.id && currentUser.id !== session.user.id) neutralizeDraftWrites();
   currentUser = session.user;
-  const uid = session.user.id;
-  const epoch = sessionEpoch;
-  const stillCurrent = () => epoch === sessionEpoch && currentUser?.id === uid;
-  hideWorkspace();
-  workspaceErrorState.hidden = true;
   accountEmail.textContent = backend.guestMode ? "This device" : (session.user.email || "Signed in");
   signOutButton.hidden = Boolean(backend.guestMode);
-  document.querySelector("#refreshInvoicesButton").hidden = Boolean(backend.guestMode);
-  historyErrorState.querySelector("p").textContent = backend.guestMode
-    ? "Invoices could not be loaded from this browser. Download a backup, then check browser storage and try again."
-    : "Invoices could not be loaded. Check your connection and try again.";
   historyIntro.textContent = backend.guestMode
     ? "Create, edit, and duplicate invoices saved on this device."
     : "Create, edit, and duplicate invoices synced to your account.";
   historyStorageNote.textContent = backend.guestMode
     ? "Invoices and drafts exist only in this browser profile. Clearing site data, using private browsing, or changing devices can remove access. Download a backup regularly."
-    : "Invoices and synced drafts are saved privately to your account. Sign in on another device to access them. Draft changes made offline stay on this device until synced.";
+    : "Invoices and drafts are protected by your account.";
   if (backend.guestMode) setDraftSyncStatus("synced", "Saved locally");
   accountControls.hidden = false;
   storageRecoveryPage.hidden = true;
   authPage.hidden = false;
-  authSignInState.hidden = true;
   setAuthMessage("Loading your invoices...");
 
   try {
     const migrationAction = await promptForLegacyMigration(session);
-    if (!stillCurrent()) return;
     if (migrationAction === "cancelled") {
       await backend.signOut();
       return;
     }
     if (migrationAction === "signed-out") return;
     const [historyPage, remoteDraftRecord] = await Promise.all([
-      backend.listInvoices(uid, { limit: HISTORY_PAGE_SIZE, query: "" }),
-      backend.loadDraft(uid),
+      backend.listInvoices(currentUser.id, { limit: HISTORY_PAGE_SIZE, query: "" }),
+      backend.loadDraft(currentUser.id),
     ]);
-    if (!stillCurrent()) return;
     invoiceHistory = normalizeHistoryRecords(historyPage.records || []);
     historyNextCursor = historyPage.nextCursor || undefined;
     historyTotal = Number.isFinite(Number(historyPage.total)) ? Number(historyPage.total) : invoiceHistory.length;
     historyLoadError = false;
-    const reconciledDraftRecord = await reconcileDraftOutbox(uid, remoteDraftRecord);
-    if (!stillCurrent()) return;
-    const nextState = normalizeInvoiceData(reconciledDraftRecord?.invoice) || await createLocalInvoiceDraft();
-    if (!stillCurrent()) return;
-    state = nextState;
+    const reconciledDraftRecord = await reconcileDraftOutbox(currentUser.id, remoteDraftRecord);
+    state = normalizeInvoiceData(reconciledDraftRecord?.invoice) || await createLocalInvoiceDraft();
     draftRevision = Number.isInteger(reconciledDraftRecord?.revision) ? reconciledDraftRecord.revision : undefined;
     draftChanged = Boolean(state.draftDirty);
     draftPersistenceEnabled = Boolean(reconciledDraftRecord);
@@ -1109,27 +988,24 @@ async function loadAuthenticatedWorkspace(session) {
       : "Existing browser invoices were moved to your account.");
     if (migrationAction === "discarded") showToast("Local browser data was discarded without moving it.");
   } catch (error) {
-    if (!stillCurrent()) return;
     if (backend.guestMode && ["LOCAL_DATA_CORRUPT", "LOCAL_STORAGE_UNAVAILABLE"].includes(error?.code)) {
       showStorageRecovery(error);
       return;
     }
-    hideWorkspace();
-    authPage.hidden = false;
-    authSignInState.hidden = true;
-    workspaceErrorState.hidden = false;
-    accountControls.hidden = false;
-    setAuthMessage(error?.code === "permission-denied"
-      ? "Your account could not access its database. The app administrator needs to check the Firebase access rules."
-      : (error?.message || "Your account data could not be loaded. Try again."), "error");
+    try {
+      await backend.signOut();
+    } catch {}
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    showSignedOutPage();
+    setAuthMessage(error?.message || "Your account data could not be loaded. Try again.", "error");
   } finally {
-    if (stillCurrent()) workspaceLoading = false;
+    workspaceLoading = false;
   }
 }
 
 async function handleSignIn(event) {
   event.preventDefault();
-  if (authBusy || !authForm.reportValidity()) return;
+  if (!authForm.reportValidity()) return;
   const email = authEmail.value.trim();
   const password = authPassword.value;
   authPassword.value = "";
@@ -1145,25 +1021,8 @@ async function handleSignIn(event) {
   }
 }
 
-async function handleGoogleSignIn() {
-  if (authBusy) return;
-  authPassword.value = "";
-  setAuthBusy(true);
-  setAuthMessage("Choose your Google account in the sign-in window...");
-  try {
-    const { session } = await backend.signInWithGoogle();
-    if (session) await loadAuthenticatedWorkspace(session);
-  } catch (error) {
-    const cancelled = ["auth/popup-closed-by-user", "auth/cancelled-popup-request"].includes(error?.code);
-    setAuthMessage(error?.code === "auth/google-loading" ? error.message : authFailureMessage(error, "google-sign-in"), cancelled ? "" : "error");
-  } finally {
-    setAuthBusy(false);
-    if (!authPage.hidden && !authSignInState.hidden) googleSignInButton.focus({ preventScroll: true });
-  }
-}
-
 async function handleCreateAccount() {
-  if (authBusy || !authForm.reportValidity()) return;
+  if (!authForm.reportValidity()) return;
   const email = authEmail.value.trim();
   const password = authPassword.value;
   authPassword.value = "";
@@ -1227,14 +1086,10 @@ async function handlePasswordRecovery(event) {
   try {
     await backend.updatePassword(password);
     const session = await backend.getSession();
-    if (session) await loadAuthenticatedWorkspace(session);
-    else showSignedOutPage();
-    const cleanUrl = new URL(window.location.href);
-    for (const key of ["mode", "oobCode", "apiKey", "lang", "continueUrl"]) cleanUrl.searchParams.delete(key);
-    window.history.replaceState({}, "", cleanUrl);
-    setAuthMessage("Password updated. Sign in with your new password.");
+    setAuthMessage("Password updated.");
+    await loadAuthenticatedWorkspace(session);
   } catch (error) {
-    setAuthMessage(authFailureMessage(error, "password-reset"), "error");
+    setAuthMessage(error?.message || "The password could not be updated.", "error");
   } finally {
     setAuthBusy(false);
   }
@@ -1247,8 +1102,8 @@ async function handleSignOut() {
     await outboxWriteQueue.catch(() => {});
     if (currentUser && await draftOutbox.has(currentUser.id)) {
       setDraftSyncStatus("error", "Sync this draft before signing out");
-      showToast("This draft has not synced. You can keep it on this device and sign in again later to sync.");
-      if (!window.confirm("This draft has not synced yet. Sign out and keep it on this device? It will retry when you sign in to this account again.")) return;
+      showToast("This draft is saved on this device but has not synced. Reconnect and wait for sync before signing out.");
+      return;
     }
     await backend.signOut();
     showSignedOutPage();
@@ -1262,42 +1117,29 @@ async function handleSignOut() {
 async function initializeApplication() {
   if (!backend?.configured) {
     showConfigurationPage();
-    appLoadingScreen.hidden = true;
     return;
   }
 
-  const initialAuthVersion = authStateVersion;
   backend.onAuthStateChange((event, session) => {
-    if (new URL(window.location.href).searchParams.get("mode") === "resetPassword") return;
     if (event === "PASSWORD_RECOVERY") {
-      authStateVersion += 1;
       currentUser = session?.user;
       showPasswordRecoveryPage();
       return;
     }
     if (event === "SIGNED_OUT") {
-      authStateVersion += 1;
       showSignedOutPage();
       return;
     }
     if (session && (event === "SIGNED_IN" || event === "INITIAL_SESSION")) {
-      authStateVersion += 1;
       loadAuthenticatedWorkspace(session);
     }
   });
 
   try {
-    if (backend.preparePasswordRecovery && new URL(window.location.href).searchParams.get("mode") === "resetPassword") {
-      await backend.preparePasswordRecovery(window.location.href);
-      showPasswordRecoveryPage();
-      return;
-    }
     const session = await backend.getSession();
-    if (initialAuthVersion !== authStateVersion) return;
     if (session) await loadAuthenticatedWorkspace(session);
     else showSignedOutPage();
   } catch (error) {
-    if (initialAuthVersion !== authStateVersion) return;
     if (backend.guestMode && ["LOCAL_DATA_CORRUPT", "LOCAL_STORAGE_UNAVAILABLE"].includes(error?.code)) {
       showStorageRecovery(error);
     } else {
@@ -1307,27 +1149,6 @@ async function initializeApplication() {
   } finally {
     appLoadingScreen.classList.add("is-ready");
     window.setTimeout(() => { appLoadingScreen.hidden = true; }, 220);
-  }
-}
-
-async function reconcileResumedAuthSession() {
-  const canRestore = () => backend?.configured && !backend.guestMode
-    && !authPage.hidden && !authSignInState.hidden && passwordRecoveryForm.hidden
-    && !workspaceLoading && !authBusy
-    && new URL(window.location.href).searchParams.get("mode") !== "resetPassword";
-  if (!canRestore()) return;
-  const epoch = sessionEpoch;
-  const version = authStateVersion;
-  try {
-    const session = await backend.getSession();
-    // Safari can restore the sign-in page from its page cache after the popup
-    // authenticates. Only a positive current result can restore the workspace;
-    // a late empty/error result must never discard an editor or newer session.
-    if (!session?.user || epoch !== sessionEpoch || version !== authStateVersion || !canRestore()) return;
-    authStateVersion += 1;
-    await loadAuthenticatedWorkspace(session);
-  } catch {
-    // Foreground checks are opportunistic. Explicit sign-in retains its error UI.
   }
 }
 
@@ -1369,7 +1190,6 @@ function saveDraft(markChanged = true) {
   clearTimeout(saveTimer);
   draftPersistenceEnabled = true;
   if (markChanged) {
-    clearOutputPdfContext();
     draftChanged = true;
     state.draftDirty = true;
   }
@@ -1386,9 +1206,6 @@ async function persistDraftImmediately() {
   clearTimeout(saveTimer);
   try {
     await stageDraftSave();
-    // An earlier sync may have inspected an empty outbox before this edit was
-    // staged. Wait for it, then flush the newly staged operation as well.
-    if (draftSyncPromise && !await draftSyncPromise) return false;
   } catch {
     return false;
   }
@@ -1455,7 +1272,6 @@ function formatHistoryAmount(value) {
 function cloneInvoice(invoice) {
   return {
     historyId: invoice.historyId,
-    historyRevision: invoice.historyRevision,
     draftDirty: Boolean(invoice.draftDirty),
     invoiceNumber: invoice.invoiceNumber,
     pdfFileName: invoice.pdfFileName,
@@ -1497,8 +1313,6 @@ async function deleteStoredDraft() {
   if (!currentUser) return true;
   const userId = currentUser.id;
   await stageDraftDelete();
-  // An earlier save can still own the sync promise. Let it rebase the queued
-  // deletion, then flush that deletion before resetting the editor.
   if (draftSyncPromise) await draftSyncPromise;
   await flushDraftOutbox({ force: true });
   if (await draftOutbox.has(userId)) throw new Error("Draft deletion is waiting to sync.");
@@ -1508,34 +1322,25 @@ async function deleteStoredDraft() {
 
 async function saveCurrentInvoiceToHistory() {
   if (!currentUser) {
-    showToast("Open your workspace before saving an invoice.");
+    showToast("Open the local workspace before saving an invoice.");
     return false;
   }
   const now = new Date().toISOString();
-  const uid = currentUser.id;
-  const epoch = sessionEpoch;
   const id = state.historyId || historyRecordId();
   const existingRecord = invoiceHistory.find((record) => record.id === id);
   const savedInvoice = cloneInvoice({ ...state, historyId: id, draftDirty: false });
   const savedRecord = {
     id,
-    revision: state.historyRevision ?? existingRecord?.revision,
+    revision: existingRecord?.revision,
     createdAt: existingRecord?.createdAt || now,
     updatedAt: now,
     invoice: savedInvoice,
   };
   let remoteRecord;
   try {
-    const draftSynced = await persistDraftImmediately();
-    if (epoch !== sessionEpoch || currentUser?.id !== uid) return false;
-    if (!draftSynced) {
-      showToast("The draft has not synced yet. Resolve any draft conflict or reconnect, then save the invoice again.");
-      return false;
-    }
-    remoteRecord = await backend.saveInvoice(uid, savedRecord);
-    if (epoch !== sessionEpoch || currentUser?.id !== uid) return false;
+    await persistDraftImmediately();
+    remoteRecord = await backend.saveInvoice(currentUser.id, savedRecord);
   } catch (error) {
-    if (epoch !== sessionEpoch || currentUser?.id !== uid) return false;
     if (error?.code === "INVOICE_REVISION_CONFLICT") {
       saveStatus.textContent = "Invoice changed elsewhere";
       showToast("This invoice changed in another session. Your edits were not overwritten; reload the invoice before saving again.");
@@ -1544,7 +1349,7 @@ async function saveCurrentInvoiceToHistory() {
       showStorageRecovery(error);
     } else {
       saveStatus.textContent = "Could not save invoice";
-      showToast(backend.guestMode ? "The invoice could not be saved. Check browser storage and try again." : (error?.message || "The invoice could not be saved. Check your connection and try again."));
+      showToast("The invoice could not be saved. Check browser storage and try again.");
     }
     return false;
   }
@@ -1555,14 +1360,12 @@ async function saveCurrentInvoiceToHistory() {
     // The invoice is already safely stored. The durable outbox will retry the
     // draft deletion, and sign-out remains blocked until it succeeds.
   }
-  if (epoch !== sessionEpoch || currentUser?.id !== uid) return false;
   invoiceHistory = [remoteRecord, ...invoiceHistory.filter((record) => record.id !== id)];
   if (!existingRecord) historyTotal += 1;
   historyQuery = "";
   invoiceSearch.value = "";
 
   state.historyId = id;
-  state.historyRevision = remoteRecord.revision;
   state.draftDirty = false;
   draftChanged = false;
   draftPersistenceEnabled = false;
@@ -1631,17 +1434,7 @@ function renderInvoiceHistory() {
     remove.dataset.deleteInvoice = record.id;
     remove.textContent = "Delete";
     remove.setAttribute("aria-label", `Delete invoice ${invoice.invoiceNumber}`);
-    actions.append(edit);
-    if (backend.pdfStorageAvailable && typeof backend.loadInvoicePdf === "function") {
-      const download = document.createElement("button");
-      download.type = "button";
-      download.className = "button button-secondary";
-      download.dataset.downloadInvoicePdf = record.id;
-      download.textContent = "Download PDF";
-      download.setAttribute("aria-label", `Download saved PDF for invoice ${invoice.invoiceNumber}`);
-      actions.append(download);
-    }
-    actions.append(duplicate, remove);
+    actions.append(edit, duplicate, remove);
 
     article.append(identity, meta, actions);
     invoiceHistoryList.append(article);
@@ -1671,39 +1464,6 @@ function renderInvoiceHistory() {
 
 function clearValidationErrors() {
   form.querySelectorAll('[aria-invalid="true"]').forEach(clearFieldError);
-}
-
-async function downloadSavedInvoicePdf(id, button) {
-  if (!currentUser || button.disabled) return;
-  const record = invoiceHistory.find((entry) => entry.id === id);
-  if (!record) return;
-  const uid = currentUser.id;
-  const epoch = sessionEpoch;
-  const stillCurrent = () => currentUser?.id === uid && sessionEpoch === epoch;
-  const fileName = `${safePdfFileName(record.invoice.pdfFileName, record.invoice.invoiceNumber)}.pdf`;
-  button.disabled = true;
-  button.textContent = "Downloading...";
-  try {
-    const blob = await backend.loadInvoicePdf(uid, { id: record.id, revision: record.revision });
-    if (!stillCurrent()) return;
-    downloadPdfBlob(blob, fileName);
-    showToast(`${fileName} downloaded from your account.`);
-  } catch (error) {
-    if (!stillCurrent()) return;
-    const message = error?.code === "storage/object-not-found"
-      ? "No PDF has been saved for this invoice yet. Open it and choose Save invoice to create one."
-      : ["INVOICE_REVISION_CONFLICT", "INVOICE_NOT_FOUND"].includes(error?.code)
-        ? "This invoice changed on another device. Refresh your invoices before downloading its PDF."
-        : error?.code === "PDF_CONTENT_CONFLICT"
-          ? "Save this invoice again to create a new PDF version before downloading it."
-          : "The saved PDF could not be downloaded. Check your connection and try again.";
-    showToast(message);
-  } finally {
-    if (button.isConnected) {
-      button.disabled = false;
-      button.textContent = "Download PDF";
-    }
-  }
 }
 
 function showEditorPage(mode = "new", focusEditor = true) {
@@ -1757,7 +1517,6 @@ function editSavedInvoice(id) {
   clearValidationErrors();
   state = cloneInvoice(record.invoice);
   state.historyId = record.id;
-  state.historyRevision = record.revision;
   draftChanged = false;
   draftPersistenceEnabled = true;
   fillForm();
@@ -1774,7 +1533,6 @@ async function duplicateSavedInvoice(id) {
   state = {
     ...cloneInvoice(record.invoice),
     historyId: undefined,
-    historyRevision: undefined,
     draftDirty: true,
     items: record.invoice.items.map((item, index) => ({
       ...item,
@@ -1796,7 +1554,7 @@ async function deleteSavedInvoice(id) {
   const label = record.invoice.invoiceNumber || "this invoice";
   const deletesCurrentInvoice = state.historyId === record.id;
   const draftWarning = deletesCurrentInvoice ? " and any linked draft changes" : "";
-  if (!window.confirm(`Permanently delete invoice ${label}${draftWarning} from ${backend.guestMode ? "this browser" : "your account on all devices"}?`)) return;
+  if (!window.confirm(`Permanently delete invoice ${label}${draftWarning} from this browser?`)) return;
   try {
     if (deletesCurrentInvoice) await deleteStoredDraft();
     const removed = await backend.deleteInvoice(currentUser.id, record.id, record.revision);
@@ -1833,7 +1591,6 @@ function setText(selector, value) {
 }
 
 function fillForm() {
-  clearOutputPdfContext();
   for (const input of form.querySelectorAll("[data-field]")) {
     input.value = state[input.dataset.field] ?? "";
   }
@@ -2339,112 +2096,17 @@ function invoiceIsReady(action) {
   return true;
 }
 
-function clearOutputPdfContext() {
-  outputPdfContext = undefined;
-  cloudPdfPanel.hidden = true;
-  cloudPdfStatus.textContent = "";
-  delete cloudPdfStatus.dataset.state;
-  retryCloudPdfButton.hidden = true;
-}
-
-function isCurrentOutputPdf(context) {
-  return context && outputPdfContext === context && context.epoch === sessionEpoch
-    && context.uid === currentUser?.id;
-}
-
-function setCloudPdfStatus(message, status) {
-  cloudPdfPanel.hidden = false;
-  cloudPdfStatus.textContent = message;
-  cloudPdfStatus.dataset.state = status;
-  retryCloudPdfButton.hidden = status !== "error";
-}
-
-async function outputPdfBlob(context) {
-  if (!context.blobPromise) {
-    context.blobPromise = createInvoicePdfWorker(context).then(async ({ worker }) => {
-      const blob = await worker.outputPdf("blob");
-      if (!(blob instanceof Blob) || !blob.size) throw new Error("The PDF could not be created.");
-      context.blob = blob;
-      return blob;
-    }).catch((error) => {
-      context.blobPromise = undefined;
-      throw error;
-    });
-  }
-  return context.blobPromise;
-}
-
-async function saveOutputPdfToAccount() {
-  const context = outputPdfContext;
-  if (!isCurrentOutputPdf(context) || outputBusy || context.saved) return;
-  setOutputBusy(true, "Saving PDF to account...");
-  setCloudPdfStatus("Invoice details saved. Creating and saving your PDF to this account...", "saving");
-  try {
-    const blob = await outputPdfBlob(context);
-    if (!isCurrentOutputPdf(context)) return;
-    const record = { id: context.id, revision: context.revision };
-    const result = await backend.saveInvoicePdf(context.uid, record, blob);
-    if (!isCurrentOutputPdf(context)) return;
-    if (result.alreadySaved) {
-      // A different renderer may have saved this revision first. Reuse the
-      // stored bytes for downloads and print, including PDF metadata.
-      const storedBlob = await backend.loadInvoicePdf(context.uid, record);
-      if (!isCurrentOutputPdf(context)) return;
-      context.blob = storedBlob;
-      context.blobPromise = Promise.resolve(storedBlob);
-    }
-    context.saved = true;
-    setCloudPdfStatus("PDF saved to your account.", "saved");
-  } catch (error) {
-    if (!isCurrentOutputPdf(context)) return;
-    const reason = ["storage/unauthorized", "storage/bucket-not-found", "PDF_STORAGE_UNAVAILABLE"].includes(error?.code)
-      ? "Cloud PDF storage needs to be enabled by the app administrator."
-      : error?.code === "PDF_CONTENT_CONFLICT"
-        ? "Save this invoice again to create a new PDF version."
-        : ["INVOICE_NOT_FOUND", "INVOICE_REVISION_CONFLICT"].includes(error?.code)
-        ? "This invoice changed on another device. Reopen its latest saved version before saving a PDF."
-        : error?.code === "PDF_INVALID_FILE"
-          ? "The generated PDF could not be accepted by cloud storage."
-          : !context.blob
-            ? "The PDF could not be created. Try again."
-            : "Retry the upload when your connection is available.";
-    setCloudPdfStatus(`Invoice details saved. We couldn't confirm that the PDF was saved to your account. ${reason} You can still download or print a copy.`, "error");
-  } finally {
-    if (isCurrentOutputPdf(context)) setOutputBusy(false);
-  }
-}
-
 async function openOutputDialog(event) {
-  if (invoiceSaving) return;
   if (!invoiceIsReady("saving or printing")) return;
-  invoiceSaving = true;
   outputDialogTrigger = event.currentTarget;
-  const controls = [...document.querySelectorAll(".header-actions button, #editorPage button")];
-  const previousDisabled = controls.map((button) => button.disabled);
-  for (const button of controls) button.disabled = true;
-  form.inert = true;
-  try {
-    const saved = await saveCurrentInvoiceToHistory();
-    if (!saved) return;
-    clearOutputPdfContext();
-    outputFileName.textContent = `${safePdfFileName(state.pdfFileName, state.invoiceNumber)}.pdf`;
-    if (backend.pdfStorageAvailable) {
-      outputPdfContext = {
-        uid: currentUser.id, id: state.historyId, revision: state.historyRevision,
-        epoch: sessionEpoch, invoice: cloneInvoice(state), saved: false,
-        // Clone the rendered sheet and styles before any asynchronous work.
-        exportSheet: capturePdfExportSheet(),
-      };
-    } else if (backend.provider === "firebase" && backend.pdfStorageAvailable === false) {
-      setCloudPdfStatus("Invoice details saved. Cloud PDF storage is not configured yet; download a copy to this device.", "unavailable");
-    }
-    outputDialog.showModal();
-    if (outputPdfContext) await saveOutputPdfToAccount();
-  } finally {
-    controls.forEach((button, index) => { button.disabled = previousDisabled[index]; });
-    form.inert = false;
-    invoiceSaving = false;
-  }
+  printButton.disabled = true;
+  document.querySelector("#mobilePrintButton").disabled = true;
+  const saved = await saveCurrentInvoiceToHistory();
+  printButton.disabled = false;
+  document.querySelector("#mobilePrintButton").disabled = false;
+  if (!saved) return;
+  outputFileName.textContent = `${safePdfFileName(state.pdfFileName, state.invoiceNumber)}.pdf`;
+  outputDialog.showModal();
 }
 
 function closeOutputDialog() {
@@ -2458,14 +2120,13 @@ function dismissOutputDialog() {
   outputDialogTrigger = undefined;
 }
 
-function setOutputBusy(isBusy, label = "Creating PDF...") {
+function setOutputBusy(isBusy) {
   outputBusy = isBusy;
   savePdfButton.disabled = isBusy;
   printNowButton.disabled = isBusy;
   closeOutputDialogButton.disabled = isBusy;
   cancelOutputDialogButton.disabled = isBusy;
-  retryCloudPdfButton.disabled = isBusy;
-  savePdfButtonLabel.textContent = isBusy ? label : "Save as PDF";
+  savePdfButtonLabel.textContent = isBusy ? "Creating PDF..." : "Save as PDF";
   outputDialog.setAttribute("aria-busy", String(isBusy));
 }
 
@@ -2478,19 +2139,19 @@ function pdfSearchText(value) {
     .trim();
 }
 
-function addSearchablePdfText(pdf, invoice = state) {
+function addSearchablePdfText(pdf) {
   if (typeof pdf?.text !== "function") return;
   const lines = [
     "INVOICE",
-    `Invoice Number: ${pdfSearchText(invoice.invoiceNumber)}`,
-    `Invoice Date: ${formatDate(invoice.invoiceDate)}`,
-    `Invoice Due Date: ${formatDate(invoice.dueDate)}`,
+    `Invoice Number: ${pdfSearchText(state.invoiceNumber)}`,
+    `Invoice Date: ${formatDate(state.invoiceDate)}`,
+    `Invoice Due Date: ${formatDate(state.dueDate)}`,
     "BILL FROM: TIONG BAHRU SERVICED APARTMENTS PTE LTD, UEN 201420098R",
-    `BILL TO: ${pdfSearchText(invoice.billTo)}`,
-    ...invoice.items.map((item, index) => (
+    `BILL TO: ${pdfSearchText(state.billTo)}`,
+    ...state.items.map((item, index) => (
       `${index + 1}. ${pdfSearchText(stripBoldMarkers(item.description))} - SGD ${formatAmount(Number(item.quantity) * Number(item.price))}`
     )),
-    `TOTAL: SGD ${formatAmount(invoice.items.reduce((total, item) => total + Number(item.quantity) * Number(item.price), 0))}`,
+    `TOTAL: SGD ${formatAmount(invoiceTotal())}`,
     "Payments for weekend market space bookings are non-refundable upon confirmation.",
     "PAYNOW: TIONG BAHRU SERVICED APARTMENTS PTE LTD, UEN 201420098R",
     "sgtbsapl@gmail.com - instagram.com/enghoonresidences",
@@ -2538,7 +2199,7 @@ async function embeddedImageSource(image) {
   return blobToDataUrl(await response.blob());
 }
 
-function capturePdfExportSheet() {
+async function createPdfExportSheet() {
   const exportSheet = invoiceSheet.cloneNode(true);
   const sourceElements = [invoiceSheet, ...invoiceSheet.querySelectorAll("*")];
   const exportElements = [exportSheet, ...exportSheet.querySelectorAll("*")];
@@ -2552,6 +2213,15 @@ function capturePdfExportSheet() {
     }
   });
 
+  const sourceImages = [...invoiceSheet.querySelectorAll("img")];
+  const exportImages = [...exportSheet.querySelectorAll("img")];
+  await Promise.all(sourceImages.map(async (sourceImage, index) => {
+    const exportImage = exportImages[index];
+    exportImage.removeAttribute("srcset");
+    exportImage.src = await embeddedImageSource(sourceImage);
+    if (typeof exportImage.decode === "function") await exportImage.decode();
+  }));
+
   exportSheet.removeAttribute("id");
   exportSheet.style.width = `${Math.floor(PAPER_WIDTH)}px`;
   exportSheet.style.height = "auto";
@@ -2562,22 +2232,11 @@ function capturePdfExportSheet() {
   return exportSheet;
 }
 
-async function createPdfExportSheet(capturedSheet) {
-  const exportSheet = capturedSheet ? capturedSheet.cloneNode(true) : capturePdfExportSheet();
-  await Promise.all([...exportSheet.querySelectorAll("img")].map(async (image) => {
-    const source = await embeddedImageSource(image);
-    image.removeAttribute("srcset");
-    image.src = source;
-    if (typeof image.decode === "function") await image.decode();
-  }));
-  return exportSheet;
-}
-
-async function createInvoicePdfWorker(context) {
-  const invoice = context?.invoice || cloneInvoice(state);
-  const [, exportSheet] = await Promise.all([loadPdfLibrary(), createPdfExportSheet(context?.exportSheet)]);
-  const pdfBaseName = safePdfFileName(invoice.pdfFileName, invoice.invoiceNumber);
+async function createInvoicePdfWorker() {
+  await loadPdfLibrary();
+  const pdfBaseName = safePdfFileName(state.pdfFileName, state.invoiceNumber);
   const pdfFileName = `${pdfBaseName}.pdf`;
+  const exportSheet = await createPdfExportSheet();
   const worker = window
     .html2pdf()
     .set({
@@ -2592,14 +2251,14 @@ async function createInvoicePdfWorker(context) {
     .get("pdf")
     .then((pdf) => {
       try {
-        addSearchablePdfText(pdf, invoice);
+        addSearchablePdfText(pdf);
       } catch {
         // Keep the visual PDF available if an older PDF engine does not
         // support invisible searchable text.
       }
       pdf.setProperties({
         title: pdfBaseName,
-        subject: `Invoice ${invoice.invoiceNumber}`,
+        subject: `Invoice ${state.invoiceNumber}`,
         author: "Eng Hoon Residences",
         creator: "Eng Hoon Residences",
       });
@@ -2607,65 +2266,29 @@ async function createInvoicePdfWorker(context) {
   return { worker, pdfBaseName, pdfFileName };
 }
 
-function downloadPdfBlob(blob, fileName) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 async function downloadInvoicePdf() {
-  if (outputBusy) return;
   if (!invoiceIsReady("saving")) {
     dismissOutputDialog();
     return;
   }
 
   setOutputBusy(true);
-  const context = outputPdfContext;
-  const uid = currentUser?.id;
-  const epoch = sessionEpoch;
-  const stillCurrent = () => currentUser?.id === uid && sessionEpoch === epoch;
   try {
-    if (context) {
-      const blob = await outputPdfBlob(context);
-      if (!isCurrentOutputPdf(context)) return;
-      const fileName = `${safePdfFileName(context.invoice.pdfFileName, context.invoice.invoiceNumber)}.pdf`;
-      downloadPdfBlob(blob, fileName);
-      if (context.saved) dismissOutputDialog();
-      showToast(`${fileName} downloaded to this device.`);
-    } else {
-      const { worker, pdfFileName } = await createInvoicePdfWorker();
-      if (!stillCurrent()) return;
-      if (backend.provider === "firebase") {
-        const blob = await worker.outputPdf("blob");
-        if (!stillCurrent()) return;
-        downloadPdfBlob(blob, pdfFileName);
-      } else {
-        await worker.save();
-        if (!stillCurrent()) return;
-      }
-      dismissOutputDialog();
-      showToast(backend.provider === "firebase" ? `${pdfFileName} downloaded to this device.` : `${pdfFileName} saved.`);
-    }
+    const { worker, pdfFileName } = await createInvoicePdfWorker();
+    await worker.save();
+    dismissOutputDialog();
+    showToast(`${pdfFileName} saved.`);
   } catch (error) {
-    if (!stillCurrent()) return;
-    if (context && !isCurrentOutputPdf(context)) return;
     const message = typeof window.html2pdf === "function"
       ? "The PDF could not be created. Try again or use Print."
       : "PDF saving is unavailable. Check your connection and try again, or use Print.";
     showToast(message);
   } finally {
-    if (stillCurrent() && (!context || isCurrentOutputPdf(context))) setOutputBusy(false);
+    setOutputBusy(false);
   }
 }
 
 async function printInvoice() {
-  if (outputBusy) return;
   if (!invoiceIsReady("printing")) {
     dismissOutputDialog();
     return;
@@ -2685,23 +2308,9 @@ async function printInvoice() {
   }
 
   setOutputBusy(true);
-  const context = outputPdfContext;
-  const uid = currentUser?.id;
-  const epoch = sessionEpoch;
-  const stillCurrent = () => currentUser?.id === uid && sessionEpoch === epoch;
   try {
-    let pdfBlob;
-    let pdfFileName;
-    if (context) {
-      pdfBlob = await outputPdfBlob(context);
-      if (!isCurrentOutputPdf(context)) { printWindow.close(); return; }
-      pdfFileName = `${safePdfFileName(context.invoice.pdfFileName, context.invoice.invoiceNumber)}.pdf`;
-    } else {
-      const result = await createInvoicePdfWorker();
-      pdfBlob = await result.worker.outputPdf("blob");
-      pdfFileName = result.pdfFileName;
-    }
-    if (!stillCurrent()) { printWindow.close(); return; }
+    const { worker, pdfFileName } = await createInvoicePdfWorker();
+    const pdfBlob = await worker.outputPdf("blob");
     const pdfUrl = URL.createObjectURL(pdfBlob);
     printWindow.addEventListener("load", () => {
       window.setTimeout(() => {
@@ -2715,18 +2324,16 @@ async function printInvoice() {
     }, { once: true });
     printWindow.location.replace(pdfUrl);
     window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 300000);
-    if (!context || context.saved) dismissOutputDialog();
+    dismissOutputDialog();
     showToast(`${pdfFileName} opened for printing.`);
   } catch {
     printWindow.close();
-    if (!stillCurrent()) return;
-    if (context && !isCurrentOutputPdf(context)) return;
     const message = typeof window.html2pdf === "function"
       ? "The print copy could not be created. Try Save as PDF."
       : "Printing is unavailable. Check your connection and try again.";
     showToast(message);
   } finally {
-    if (stillCurrent() && (!context || isCurrentOutputPdf(context))) setOutputBusy(false);
+    setOutputBusy(false);
   }
 }
 
@@ -2811,11 +2418,6 @@ document.querySelector("#continueDraftButton").addEventListener("click", () => {
 document.querySelector("#deleteDraftButton").addEventListener("click", deleteUnsavedDraft);
 invoiceListButton.addEventListener("click", () => showInvoiceList());
 invoiceHistoryList.addEventListener("click", (event) => {
-  const downloadPdfButton = event.target.closest("[data-download-invoice-pdf]");
-  if (downloadPdfButton) {
-    downloadSavedInvoicePdf(downloadPdfButton.dataset.downloadInvoicePdf, downloadPdfButton);
-    return;
-  }
   const editButton = event.target.closest("[data-edit-invoice]");
   if (editButton) {
     editSavedInvoice(editButton.dataset.editInvoice);
@@ -2842,9 +2444,9 @@ invoiceSearch.addEventListener("input", () => {
 });
 loadMoreInvoicesButton.addEventListener("click", () => loadInvoiceHistory());
 retryHistoryButton.addEventListener("click", () => loadInvoiceHistory({ reset: invoiceHistory.length === 0 }));
-exportDataButton.addEventListener("click", async () => {
+exportDataButton.addEventListener("click", () => {
   try {
-    await downloadWorkspaceBackup();
+    downloadLocalBackup();
   } catch (error) {
     showToast(error?.message || "The backup could not be created.");
   }
@@ -2869,7 +2471,6 @@ fitPreviewButton.addEventListener("click", () => setPreviewScaleMode("fit"));
 actualSizePreviewButton.addEventListener("click", () => setPreviewScaleMode("actual"));
 backToEditorButton.addEventListener("click", viewEditor);
 savePdfButton.addEventListener("click", downloadInvoicePdf);
-retryCloudPdfButton.addEventListener("click", saveOutputPdfToAccount);
 printNowButton.addEventListener("click", printInvoice);
 closeOutputDialogButton.addEventListener("click", closeOutputDialog);
 cancelOutputDialogButton.addEventListener("click", closeOutputDialog);
@@ -2891,11 +2492,6 @@ moveLegacyDataButton.addEventListener("click", moveLegacyBrowserData);
 exportLegacyDataButton.addEventListener("click", exportLegacyBrowserData);
 discardLegacyDataButton.addEventListener("click", discardLegacyBrowserData);
 cancelLegacyMigrationButton.addEventListener("click", cancelLegacyMigration);
-document.querySelector("#skipLegacyMigrationButton").addEventListener("click", () => finishLegacyMigrationPrompt("skipped"));
-document.querySelector("#retryWorkspaceButton").addEventListener("click", () => {
-  if (currentUser) loadAuthenticatedWorkspace({ user: currentUser });
-});
-document.querySelector("#refreshInvoicesButton").addEventListener("click", () => loadInvoiceHistory({ reset: true }));
 draftConflictDialog.addEventListener("cancel", (event) => event.preventDefault());
 keepLocalDraftButton.addEventListener("click", () => finishDraftConflictChoice("local"));
 keepCloudDraftButton.addEventListener("click", () => finishDraftConflictChoice("cloud"));
@@ -2939,16 +2535,8 @@ window.addEventListener("storage", (event) => {
   }
 });
 window.addEventListener("pagehide", persistDraftImmediately);
-window.addEventListener("pageshow", () => {
-  reconcileResumedAuthSession();
-  checkForAppUpdate();
-});
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") persistDraftImmediately();
-  else {
-    reconcileResumedAuthSession();
-    checkForAppUpdate();
-  }
 });
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
@@ -2983,7 +2571,6 @@ document.querySelector(".skip-link").addEventListener("click", () => {
 });
 
 authForm.addEventListener("submit", handleSignIn);
-googleSignInButton.addEventListener("click", handleGoogleSignIn);
 createAccountButton.addEventListener("click", handleCreateAccount);
 forgotPasswordButton.addEventListener("click", handlePasswordReset);
 authEmail.addEventListener("input", () => {
@@ -2997,19 +2584,10 @@ function offerServiceWorkerUpdate(worker) {
   if (!worker) return;
   waitingServiceWorker = worker;
   updateButton.hidden = false;
-  updateButton.disabled = authBusy || serviceWorkerUpdateRequested;
-}
-
-function checkForAppUpdate() {
-  if (!serviceWorkerRegistration || navigator.onLine === false || authBusy) return;
-  if (Date.now() - serviceWorkerUpdateCheck < 60000) return;
-  serviceWorkerUpdateCheck = Date.now();
-  serviceWorkerRegistration.update().catch(() => {});
 }
 
 updateButton.addEventListener("click", () => {
-  if (!waitingServiceWorker || authBusy || serviceWorkerUpdateRequested) return;
-  serviceWorkerUpdateRequested = true;
+  if (!waitingServiceWorker) return;
   updateButton.disabled = true;
   updateButton.textContent = "Updating...";
   waitingServiceWorker.postMessage({ type: "SKIP_WAITING" });
@@ -3017,14 +2595,13 @@ updateButton.addEventListener("click", () => {
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (reloadingForServiceWorker || !serviceWorkerUpdateRequested) return;
+    if (reloadingForServiceWorker || !waitingServiceWorker) return;
     reloadingForServiceWorker = true;
     window.location.reload();
   });
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" })
+    navigator.serviceWorker.register("./sw.js")
       .then((registration) => {
-        serviceWorkerRegistration = registration;
         if (registration.waiting) offerServiceWorkerUpdate(registration.waiting);
         registration.addEventListener("updatefound", () => {
           const worker = registration.installing;

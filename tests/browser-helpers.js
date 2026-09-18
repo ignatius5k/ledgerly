@@ -24,7 +24,7 @@ const TYPES = {
   ".webmanifest": "application/manifest+json",
 };
 
-function startServer(options = {}) {
+function startServer() {
   const server = createServer(async (request, response) => {
     try {
       const pathname = new URL(request.url, "http://localhost").pathname;
@@ -35,20 +35,7 @@ function startServer(options = {}) {
       if (!info.isFile()) throw new Error("Not a file");
       response.setHeader("Content-Type", TYPES[extname(filePath)] || "application/octet-stream");
       response.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
-      let body = await readFile(filePath);
-      if (relativePath === "firebase-config.js") {
-        body = options.firebaseConfig
-          ? `window.INVOICE_FIREBASE_CONFIG = ${JSON.stringify(options.firebaseConfig)};`
-          : options.firebase
-          ? 'window.INVOICE_FIREBASE_CONFIG = {apiKey:"fake-emulator-key",projectId:"demo-ledgerly",appId:"browser-test",storageBucket:"demo-ledgerly.firebasestorage.app",authDomain:"demo-ledgerly.firebaseapp.com"}; window.INVOICE_FIREBASE_EMULATORS={auth:9099,firestore:8080,storage:9199};'
-          : 'window.INVOICE_FIREBASE_CONFIG = null;';
-      }
-      if (options.firebase && relativePath === "index.html") {
-        body = body.toString()
-          .replace("connect-src 'self'", "connect-src 'self' http://127.0.0.1:9099 http://127.0.0.1:8080 http://127.0.0.1:9199")
-          .replace("frame-src 'self'", "frame-src 'self' http://127.0.0.1:9099");
-      }
-      response.end(body);
+      response.end(await readFile(filePath));
     } catch {
       response.statusCode = 404;
       response.end("Not found");

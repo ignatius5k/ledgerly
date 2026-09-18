@@ -55,15 +55,6 @@ jobs:
       - name: Run application and infrastructure tests
         run: npm test
 
-      - name: Install Java for the Firestore emulator
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Verify Firebase authentication, invoice PDF storage, rules, and browser workflow
-        run: npm run test:firebase
-
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
@@ -80,27 +71,12 @@ jobs:
           git diff --check
           git diff --exit-code
 
-      - name: Build Firebase app for GitHub Pages
+      - name: Verify local-only Pages artifact
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        env:
-          FIREBASE_WEB_CONFIG: ${{ secrets.FIREBASE_WEB_CONFIG }}
         run: |
-          test -n "$FIREBASE_WEB_CONFIG" || { echo "Set the FIREBASE_WEB_CONFIG repository secret before deploying Pages."; exit 1; }
-          npm run build
-          node <<'NODE'
-          const fs = require('node:fs');
-          const vm = require('node:vm');
-          const assert = require('node:assert/strict');
-          const window = {};
-          vm.runInNewContext(fs.readFileSync('dist/firebase-config.js', 'utf8'), { window }, { timeout: 1000 });
-          const config = window.INVOICE_FIREBASE_CONFIG;
-          for (const key of ['apiKey', 'authDomain', 'projectId', 'appId', 'storageBucket']) {
-            assert.equal(typeof config?.[key], 'string', `Pages build is missing Firebase ${key}`);
-            assert.ok(config[key].trim(), `Pages build has empty Firebase ${key}`);
-          }
-          assert.ok(fs.statSync('dist/vendor/firebase-client.js').size > 0, 'Pages build is missing the Firebase SDK');
-          console.log('Firebase configuration and SDK are present in the Pages build.');
-          NODE
+          test ! -e dist/firebase-config.js
+          test ! -e dist/vendor/firebase-client.js
+          ! grep -E 'firebase-config|firebase-client|accounts.google.com' dist/index.html
 
       - name: Upload GitHub Pages artifact
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'

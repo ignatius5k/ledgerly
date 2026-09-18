@@ -398,7 +398,6 @@
     },
     onAuthStateChange: () => ({ unsubscribe() {} }),
     signIn: unavailableAccountAction,
-    signInWithGoogle: unavailableAccountAction,
     signUp: unavailableAccountAction,
     sendPasswordReset: unavailableAccountAction,
     updatePassword: unavailableAccountAction,
@@ -416,17 +415,4 @@
     restoreLocalData,
     clearLocalData,
   };
-
-  if (window.INVOICE_FIREBASE_CONFIG) {
-    const localBackend = window.invoiceBackend;
-    try {
-      if (typeof window.createFirebaseInvoiceBackend !== "function") throw new Error("Firebase could not be loaded. Refresh the app and try again.");
-      window.invoiceBackend = window.createFirebaseInvoiceBackend(window.INVOICE_FIREBASE_CONFIG, localBackend, {
-        emulators: window.INVOICE_FIREBASE_EMULATORS,
-      });
-    } catch (error) {
-      // A broken cloud configuration must never silently save to a local account.
-      window.invoiceBackend = { configured: false, configurationError: error.message };
-    }
-  }
 }());

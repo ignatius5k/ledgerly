@@ -1,6 +1,6 @@
 /*
-  Content-Security-Policy: default-src 'self'; connect-src 'self' https://accounts.google.com/gsi/ https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://firebasestorage.googleapis.com; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; script-src 'self' https://apis.google.com https://accounts.google.com/gsi/client; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com/gsi/; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
-  Cross-Origin-Opener-Policy: same-origin-allow-popups
+  Content-Security-Policy: default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
+  Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Resource-Policy: same-origin
   Permissions-Policy: camera=(), display-capture=(), geolocation=(), microphone=(), payment=(), usb=()
   Referrer-Policy: no-referrer
@@ -16,6 +16,3 @@
 
 /sw.js
   Cache-Control: no-cache, no-store, must-revalidate
-
-/firebase-config.js
-  Cache-Control: no-cache, must-revalidate
