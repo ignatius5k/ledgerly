@@ -778,9 +778,24 @@ h1 {
   margin-top: 13px;
 }
 
+/* Keep iOS native date controls inside the grid and at the normal tap height. */
 input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
   min-width: 0;
   max-width: 100%;
+  height: 44px;
+  line-height: normal;
+}
+
+input[type="date"]::-webkit-date-and-time-value {
+  min-height: 1em;
+  text-align: left;
+}
+
+.field-grid.invoice-date-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .field-stack label {
