@@ -1151,7 +1151,7 @@ async function handleGoogleSignIn() {
     if (session) await loadAuthenticatedWorkspace(session);
   } catch (error) {
     const cancelled = ["auth/popup-closed-by-user", "auth/cancelled-popup-request"].includes(error?.code);
-    setAuthMessage(authFailureMessage(error, "google-sign-in"), cancelled ? "" : "error");
+    setAuthMessage(error?.code === "auth/google-loading" ? error.message : authFailureMessage(error, "google-sign-in"), cancelled ? "" : "error");
   } finally {
     setAuthBusy(false);
     if (!authPage.hidden && !authSignInState.hidden) googleSignInButton.focus({ preventScroll: true });

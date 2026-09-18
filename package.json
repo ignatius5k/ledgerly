@@ -12,7 +12,7 @@
     "build": "npm run verify:vendor && npm run build:firebase && node scripts/build-static.js",
     "check": "node --check app.js && node --check backend.js && node --check outbox.js && node --check sw.js && node --check scripts/vendor-manifest.js && node --check scripts/sync-vendor.js && node --check scripts/verify-vendor.js && node --check scripts/build-static.js && node --check tests/browser-backend-mock.js && node --check tests/outbox.test.js && node --check tests/infrastructure.test.js && node --check tests/app.test.js && node --check firebase-backend.mjs && node --check scripts/build-firebase.js",
     "sync:vendor": "node scripts/sync-vendor.js",
-    "test": "npm run check && node --test --test-timeout=120000 --test-concurrency=1 tests/outbox.test.js tests/infrastructure.test.js tests/app.test.js",
+    "test": "npm run check && node --test --test-timeout=120000 --test-concurrency=1 tests/google-sign-in.test.mjs tests/outbox.test.js tests/infrastructure.test.js tests/app.test.js",
     "verify:vendor": "node scripts/verify-vendor.js",
     "build:firebase": "node scripts/build-firebase.js",
     "pretest": "npm run build:firebase",

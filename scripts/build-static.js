@@ -55,7 +55,7 @@ async function main() {
       if (typeof firebaseConfig[key] !== "string" || !firebaseConfig[key].trim()) throw new Error(`Firebase configuration is missing ${key}.`);
     }
     // Only the public web config belongs in the client, never service account credentials.
-    const publicConfig = Object.fromEntries(["apiKey", "authDomain", "projectId", "appId", "storageBucket", "messagingSenderId"].filter((key) => firebaseConfig[key]).map((key) => [key, firebaseConfig[key]]));
+    const publicConfig = Object.fromEntries(["apiKey", "authDomain", "projectId", "appId", "storageBucket", "messagingSenderId", "googleClientId"].filter((key) => firebaseConfig[key]).map((key) => [key, firebaseConfig[key]]));
     await writeFile(join(OUTPUT, "firebase-config.js"), `window.INVOICE_FIREBASE_CONFIG = ${JSON.stringify(publicConfig, null, 2)};\n`);
   }
 

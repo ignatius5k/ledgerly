@@ -1,10 +1,11 @@
 import { initializeApp } from "firebase/app";
+import { createGoogleTokenSignIn } from "./google-sign-in.mjs";
 import {
   initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence,
   inMemoryPersistence, onAuthStateChanged, signInWithEmailAndPassword,
   createUserWithEmailAndPassword, sendPasswordResetEmail, signOut,
   updatePassword, verifyPasswordResetCode, confirmPasswordReset,
-  connectAuthEmulator, GoogleAuthProvider, signInWithPopup, browserPopupRedirectResolver,
+  connectAuthEmulator, GoogleAuthProvider, signInWithPopup, signInWithCredential, browserPopupRedirectResolver,
 } from "firebase/auth";
 import {
   initializeFirestore, memoryLocalCache, collection, doc, getDocFromServer,
@@ -71,6 +72,10 @@ export function createFirebaseInvoiceBackend(config, localBackend, options = {})
   // account-keyed outbox, so another login cannot read a previous user's cache.
   const userAgent = environment?.navigator?.userAgent || "";
   const webKit = /AppleWebKit/i.test(userAgent) && !/(Chrome|Chromium|Edg|OPR)\//i.test(userAgent);
+  const googleClientId = config.googleClientId || (config.projectId === "ledgerly-e0c95"
+    ? "245799445908-rbu5tip6b78cb3l0jef49nt1mcaf27rh.apps.googleusercontent.com" : null);
+  const directGoogleSignIn = webKit && !options.emulators && googleClientId && environment?.document
+    ? createGoogleTokenSignIn(environment, googleClientId) : null;
   const db = initializeFirestore(app, {
     localCache: memoryLocalCache(),
     // WebKit can stall the streaming connection when returning from OAuth or
@@ -390,6 +395,11 @@ export function createFirebaseInvoiceBackend(config, localBackend, options = {})
     onAuthStateChange(callback) { listeners.add(callback); return { unsubscribe: () => listeners.delete(callback) }; },
     async signIn(email, password) { await signInWithEmailAndPassword(auth, email, password); return { session: session() }; },
     async signInWithGoogle() {
+      if (directGoogleSignIn) {
+        const token = await directGoogleSignIn();
+        await signInWithCredential(auth, GoogleAuthProvider.credential(null, token));
+        return { session: session() };
+      }
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
       // Keep the popup flow on Pages: cross-domain redirects cannot reliably
