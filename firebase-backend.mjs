@@ -187,7 +187,7 @@ export function createFirebaseInvoiceBackend(config, localBackend, options = {})
     };
   }
 
-  async function saveInvoice(userId, record) {
+  async function saveInvoice(userId, record, { preserveCreatedAt = false } = {}) {
     online(userId);
     const ref = invoiceRef(userId, record.id);
     const invoice = { ...cleanInvoice(record.invoice), historyId: record.id, draftDirty: false };
@@ -199,7 +199,9 @@ export function createFirebaseInvoiceBackend(config, localBackend, options = {})
       checkRevision(existing, record.revision, "invoice");
       const now = Timestamp.now();
       const revision = (existing?.revision || 0) + 1;
-      const originalDate = record.createdAt && new Date(record.createdAt);
+      // Normal saves must use server time: a fast device clock otherwise fails
+      // the createdAt <= request.time rule. Only imports carry historical dates.
+      const originalDate = preserveCreatedAt && record.createdAt && new Date(record.createdAt);
       const importedCreatedAt = originalDate && Number.isFinite(originalDate.getTime()) && originalDate <= new Date()
         ? Timestamp.fromDate(originalDate) : null;
       const saved = {
@@ -365,7 +367,7 @@ export function createFirebaseInvoiceBackend(config, localBackend, options = {})
         const desired = { ...record.invoice, historyId: record.id, draftDirty: false };
         if (canonicalInvoice(existing.invoice) !== canonicalInvoice(desired)) throw new Error("An imported invoice ID already belongs to a different saved invoice. Your local copy is preserved; download its backup before continuing.");
       } else {
-        await saveInvoice(uid, { ...record, revision: undefined });
+        await saveInvoice(uid, { ...record, revision: undefined }, { preserveCreatedAt: true });
       }
     }
     for (const value of numbering) {

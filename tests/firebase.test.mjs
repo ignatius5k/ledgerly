@@ -126,6 +126,23 @@ test("the rules accept full five-line invoices and their updates", async () => {
   await bob.deleteInvoice(bobId, updated.id, 2);
 });
 
+test("saving and updating a new invoice tolerates a computer clock five minutes ahead", async (t) => {
+  const actualNow = Date.now();
+  t.mock.timers.enable({ apis: ["Date"], now: actualNow + 5 * 60 * 1000 });
+  try {
+    const saved = await bob.saveInvoice(bobId, {
+      id: "clock-ahead", createdAt: new Date().toISOString(), invoice: invoice("CLOCK AHEAD"),
+    });
+    const updated = await bob.saveInvoice(bobId, { ...saved, invoice: { ...saved.invoice, billTo: "CLOCK AHEAD UPDATED" } });
+    assert.equal(updated.revision, 2);
+    const stored = (await bob.listInvoices(bobId, { query: "CLOCK AHEAD UPDATED" })).records[0];
+    assert.ok(new Date(stored.createdAt).getTime() < actualNow + 60 * 1000);
+    await bob.deleteInvoice(bobId, stored.id, stored.revision);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
 test("number reservations are atomic across devices and survive invoice deletion", async () => {
   const numbers = await Promise.all([alice.reserveInvoiceNumber("2026-10-01"), otherDevice.reserveInvoiceNumber("2026-10-01")]);
   assert.deepEqual(numbers.sort(), ["EHR-20261001-001", "EHR-20261001-002"]);
