@@ -39,6 +39,20 @@ npm audit --omit=dev --audit-level=high
 
 Use `firebase-config.local.json` or FIREBASE_WEB_CONFIG with the project's public web configuration, then run `npm run build`. The resulting `dist/` is deployable. The demo runner always supplies its own emulator configuration and never seeds the live project.
 
-This branch runs verification in GitHub Actions but does not replace main's GitHub Pages site. Publish dist to a separately configured host. For a Firebase Hosting preview, authenticate with Firebase CLI first, then use a preview channel. Configure that host in Firebase Auth authorized domains, Google OAuth JavaScript origins, and Storage CORS before expecting real Google sign-in and cloud PDF downloads to work there. See DEPLOYMENT.md for the existing project's settings.
+## Public launch
 
-No new live deployment was made during this verification. A completed real Google login on a physical iPhone/home-screen app remains a manual release check; desktop emulation and the simulated Google chooser do not establish that result.
+The Firebase prototype was publicly deployed with user authorization on 18 September 2026:
+
+- URL: https://ignatius5k.github.io/ledgerly/
+- Released commit: `68818753263aba4eeffdb3810f459ca2467c1855`
+- Cache version: v63, distinct from the device-only main build.
+- All 49 automated checks passed in [the deployment run](https://github.com/ignatius5k/ledgerly/actions/runs/35323802418).
+- Existing account history and authenticated PDF download were verified on the public site.
+
+To intentionally release a verified prototype revision, dispatch `ci.yml` on `codex/firebase-prototype`. Ordinary pushes to that branch verify only. The workflow builds with the existing `FIREBASE_WEB_CONFIG` repository secret and deploys only after the checks pass.
+
+Main remains a separate device-only branch. Its existing push deployment can replace the same Pages URL; coordinate future main releases accordingly. No main-branch source was changed for this launch.
+
+GitHub Pages uses the existing hosting arrangement. No paid hosting service was added. Existing Firebase usage/billing still applies. Physical iPhone Google sign-in and native print-sheet testing remain manual coverage limitations; WebKit iPhone emulation passed.
+
+See [the full verification report](VERIFICATION-ROUND2.md).

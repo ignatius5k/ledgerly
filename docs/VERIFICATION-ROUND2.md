@@ -1,8 +1,18 @@
 # Firebase prototype verification — 18 September 2026
 
-**Status: automated checks passed; public launch authorized by the user. Deployment pending.**
+**Status: publicly deployed with user authorization. All 49 checks passed in GitHub Actions.**
 
-Branch: `codex/firebase-prototype`, baseline `91b0545`, with local test and CI additions. This round used paired functional comparisons, not a statistical experiment with customers. No production data or deployed permissions were changed.
+Live URL: https://ignatius5k.github.io/ledgerly/
+
+Release commit: `68818753263aba4eeffdb3810f459ca2467c1855` on `codex/firebase-prototype`.
+
+[Successful verification and deployment](https://github.com/ignatius5k/ledgerly/actions/runs/35323802418).
+
+Post-deployment checks confirmed HTTP 200 for the app and Firebase SDK, the intended `ledgerly-e0c95` configuration, and cache v63. An existing signed-in account reopened its cloud invoice history, and a saved PDF was downloaded successfully from the public site. Customer records were not edited or imported. Physical iPhone testing was not performed.
+
+The release uses the existing GitHub Pages hosting. Existing Firebase billing and usage remain unchanged; this does not promise unlimited free backend usage.
+
+Branch: `codex/firebase-prototype`, baseline `91b0545`, with committed test and CI additions. This round used paired functional comparisons, not a statistical experiment with customers. No customer data or Firestore/Storage access rules were changed. The Pages deployment environment now allows the explicitly requested prototype branch.
 
 ## Results
 
@@ -80,4 +90,4 @@ Local evidence:
 - `/tmp/ledgerly-round2-audit.log`
 - `tmp/verification-round2/screenshots/`
 
-Screenshots taken immediately after reload may catch the startup fade; automated assertions separately checked the resulting invoice and downloaded PDF. Temporary evidence is local and may be cleaned by the operating system.
+Final WebKit screenshots wait for the startup screen to disappear; earlier diagnostic captures may show the startup fade. Automated assertions separately checked the resulting invoice and downloaded PDF. Temporary evidence is local and may be cleaned by the operating system.
