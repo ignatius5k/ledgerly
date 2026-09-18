@@ -136,6 +136,7 @@ let draftSaveVersion = 0;
 let draftRevision;
 let draftWriteAbortController = new AbortController();
 let sessionEpoch = 0;
+let authStateVersion = 0;
 let pendingLegacyMigration;
 let resolveLegacyMigration;
 let draftRetryTimer;
@@ -1065,6 +1066,7 @@ async function loadAuthenticatedWorkspace(session) {
   accountControls.hidden = false;
   storageRecoveryPage.hidden = true;
   authPage.hidden = false;
+  authSignInState.hidden = true;
   setAuthMessage("Loading your invoices...");
 
   try {
@@ -1260,18 +1262,22 @@ async function initializeApplication() {
     return;
   }
 
+  const initialAuthVersion = authStateVersion;
   backend.onAuthStateChange((event, session) => {
     if (new URL(window.location.href).searchParams.get("mode") === "resetPassword") return;
     if (event === "PASSWORD_RECOVERY") {
+      authStateVersion += 1;
       currentUser = session?.user;
       showPasswordRecoveryPage();
       return;
     }
     if (event === "SIGNED_OUT") {
+      authStateVersion += 1;
       showSignedOutPage();
       return;
     }
     if (session && (event === "SIGNED_IN" || event === "INITIAL_SESSION")) {
+      authStateVersion += 1;
       loadAuthenticatedWorkspace(session);
     }
   });
@@ -1283,9 +1289,11 @@ async function initializeApplication() {
       return;
     }
     const session = await backend.getSession();
+    if (initialAuthVersion !== authStateVersion) return;
     if (session) await loadAuthenticatedWorkspace(session);
     else showSignedOutPage();
   } catch (error) {
+    if (initialAuthVersion !== authStateVersion) return;
     if (backend.guestMode && ["LOCAL_DATA_CORRUPT", "LOCAL_STORAGE_UNAVAILABLE"].includes(error?.code)) {
       showStorageRecovery(error);
     } else {
@@ -1295,6 +1303,27 @@ async function initializeApplication() {
   } finally {
     appLoadingScreen.classList.add("is-ready");
     window.setTimeout(() => { appLoadingScreen.hidden = true; }, 220);
+  }
+}
+
+async function reconcileResumedAuthSession() {
+  const canRestore = () => backend?.configured && !backend.guestMode
+    && !authPage.hidden && !authSignInState.hidden && passwordRecoveryForm.hidden
+    && !workspaceLoading && !authBusy
+    && new URL(window.location.href).searchParams.get("mode") !== "resetPassword";
+  if (!canRestore()) return;
+  const epoch = sessionEpoch;
+  const version = authStateVersion;
+  try {
+    const session = await backend.getSession();
+    // Safari can restore the sign-in page from its page cache after the popup
+    // authenticates. Only a positive current result can restore the workspace;
+    // a late empty/error result must never discard an editor or newer session.
+    if (!session?.user || epoch !== sessionEpoch || version !== authStateVersion || !canRestore()) return;
+    authStateVersion += 1;
+    await loadAuthenticatedWorkspace(session);
+  } catch {
+    // Foreground checks are opportunistic. Explicit sign-in retains its error UI.
   }
 }
 
@@ -2906,8 +2935,10 @@ window.addEventListener("storage", (event) => {
   }
 });
 window.addEventListener("pagehide", persistDraftImmediately);
+window.addEventListener("pageshow", reconcileResumedAuthSession);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") persistDraftImmediately();
+  else reconcileResumedAuthSession();
 });
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();

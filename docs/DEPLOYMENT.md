@@ -1,6 +1,6 @@
 # Deployment
 
-Ledgerly remains a static PWA. Firebase's browser SDK is bundled locally during the build; Google sign-in loads Google's popup support script on demand. No application server is required. Publish the generated `dist/` directory on a stable HTTPS origin.
+Ledgerly remains a static PWA. Firebase's browser SDK is bundled locally during the build; Firebase prepares Google's popup support on Safari and iOS during authentication startup. No application server is required. Publish the generated `dist/` directory on a stable HTTPS origin.
 
 ## Activation status
 
@@ -58,7 +58,7 @@ Firebase Hosting applies `firebase.json` headers. Netlify and compatible hosts u
 
 ## Google sign-in
 
-The **Continue with Google** button uses Firebase's `GoogleAuthProvider` and `signInWithPopup`, with an account chooser on each attempt. New Google users are created automatically. The returned Firebase UID goes through the same workspace loader, local invoice import, and Firestore ownership rules as email sign-in. No Google access token is stored by application code, and no Drive or Gmail permissions are requested.
+The **Continue with Google** button uses Firebase's `GoogleAuthProvider` and `signInWithPopup`, with an account chooser on each attempt. New Google users are created automatically. The returned Firebase UID goes through the same workspace loader, local invoice import, and Firestore ownership rules as email sign-in. No Google access token is stored by application code, and no Drive or Gmail permissions are requested. Safari and iOS initialize Firebase’s popup resolver before sign-in and use Firestore long polling to avoid stalled streaming connections after OAuth or page restoration. Returning from a suspended page reconciles the authenticated session without discarding an active editor; stale startup responses cannot replace newer auth events.
 
 Use the default `ledgerly-e0c95.firebaseapp.com` auth domain from the web configuration. The HTML, Netlify header template, and Firebase Hosting configuration permit Google's `apis.google.com` popup script and Firebase's helper iframe. `Cross-Origin-Opener-Policy: same-origin-allow-popups` preserves communication with the sign-in window. If using a custom auth domain, add its HTTPS origin to `frame-src` in all three policies and configure it according to [Firebase's Google sign-in guide](https://firebase.google.com/docs/auth/web/google-signin#customizing-the-redirect-domain-for-google-sign-in).
 

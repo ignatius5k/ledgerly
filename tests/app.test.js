@@ -48,6 +48,96 @@ test("CDP commands time out or reject on disconnect instead of hanging the test"
   await assert.rejects(pending, /CDP connection closed/);
 });
 
+test("auth startup and foreground recovery cannot overwrite a newer session or active editor", async (context) => {
+  const chromePath = await findChromePath();
+  if (!chromePath) return context.skip("Set CHROME_PATH to run browser coverage");
+  const server = await startServer();
+  const appUrl = `http://127.0.0.1:${server.address().port}/`;
+  const profile = await mkdtemp(join(tmpdir(), "ledgerly-auth-lifecycle-"));
+  const chrome = spawn(chromePath, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--disable-gpu", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+  context.after(async () => {
+    chrome.kill();
+    await stopServer(server);
+    await Promise.race([new Promise((resolve) => chrome.once("exit", resolve)), new Promise((resolve) => setTimeout(resolve, 1500))]);
+    await rm(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
+  });
+  let logs = "";
+  chrome.stderr.on("data", (chunk) => { logs += chunk; });
+  const socket = await waitFor(() => logs.match(/DevTools listening on (ws:\/\/[^\s]+)/)?.[1], 15000);
+  const targets = await (await fetch(`http://127.0.0.1:${new URL(socket).port}/json/list`)).json();
+  const page = await connectCdp(targets.find((target) => target.type === "page").webSocketDebuggerUrl);
+  context.after(() => page.close());
+  await page.send("Page.enable");
+  const backendMock = await readFile(join(ROOT, "tests", "browser-backend-mock.js"), "utf8");
+  await page.send("Page.addScriptToEvaluateOnNewDocument", { source: `${backendMock}
+    window.__lifecycleDocument = location.search;
+    const originalFactory = window.__INVOICE_STUDIO_BACKEND_FACTORY__;
+    window.__INVOICE_STUDIO_BACKEND_FACTORY__ = () => {
+      const backend = originalFactory();
+      const getSession = backend.getSession;
+      let initial = true;
+      backend.getSession = () => {
+        if (!initial) return getSession();
+        initial = false;
+        return new Promise((resolve, reject) => {
+          window.__resolveStartup = resolve;
+          window.__rejectStartup = () => reject(new Error('Stale startup failure'));
+        });
+      };
+      return backend;
+    };` });
+  const read = (script) => evaluate(page, script);
+  const until = (script) => waitFor(() => read(script));
+  for (const outcome of ["null", "error", "stale-user"]) {
+    await page.send("Page.navigate", { url: `${appUrl}?lifecycle=${outcome}` });
+    await until(`window.__lifecycleDocument === '?lifecycle=${outcome}' && typeof window.__resolveStartup === 'function'`);
+    await read("window.invoiceBackend.signIn('current-owner@example.test')");
+    await until("document.body.dataset.page === 'history' && !document.querySelector('#invoiceListPage').hidden");
+    if (outcome === "stale-user") await read("window.invoiceBackend.signOut()");
+    const release = outcome === "error" ? "window.__rejectStartup()"
+      : outcome === "null" ? "window.__resolveStartup(null)"
+        : "window.__resolveStartup({ user: { id: 'obsolete-user', email: 'obsolete@example.test' } })";
+    await read(`${release}; new Promise(resolve => setTimeout(resolve, 0))`);
+    assert.equal(await read("document.body.dataset.page"), outcome === "stale-user" ? "auth" : "history", `${outcome} startup result must not override the later auth event`);
+  }
+
+  for (const event of ["pageshow", "visibilitychange"]) {
+    await read("window.invoiceBackend.signOut()");
+    await read(`window.invoiceBackend.getSession = async () => ({ user: { id: 'restored-user', email: 'restored@example.test' } });
+      ${event === "pageshow" ? "window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))" : "document.dispatchEvent(new Event('visibilitychange'))"}; true`);
+    await until("document.body.dataset.page === 'history'");
+    assert.equal(await read("document.querySelector('#accountEmail').textContent"), "restored@example.test", `${event} must recover a positive persisted session`);
+  }
+
+  await read("document.querySelector('#historyNewInvoiceButton').click(); true");
+  await until("document.body.dataset.page === 'editor'");
+  const editorState = JSON.parse(await read(`(() => {
+    const customer = document.querySelector('#billTo');
+    customer.value = 'IN-PROGRESS EDIT';
+    customer.dispatchEvent(new Event('input', { bubbles: true }));
+    window.__resumeReads = 0;
+    window.invoiceBackend.getSession = async () => { window.__resumeReads += 1; return null; };
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    document.dispatchEvent(new Event('visibilitychange'));
+    return JSON.stringify({ page: document.body.dataset.page, customer: customer.value, reads: window.__resumeReads });
+  })()`));
+  assert.deepEqual(editorState, { page: "editor", customer: "IN-PROGRESS EDIT", reads: 0 });
+
+  for (const replacement of ["sign-out", "new-account"]) {
+    await read("window.invoiceBackend.signOut()");
+    await read("window.invoiceBackend.getSession = () => new Promise(resolve => { window.__resolveResume = resolve; }); window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); true");
+    await until("typeof window.__resolveResume === 'function'");
+    if (replacement === "sign-out") await read("window.invoiceBackend.signOut()");
+    else {
+      await read("window.invoiceBackend.signIn('new-account@example.test')");
+      await until("document.body.dataset.page === 'history'");
+    }
+    await read("window.__resolveResume({ user: { id: 'obsolete-user', email: 'obsolete@example.test' } }); delete window.__resolveResume; new Promise(resolve => setTimeout(resolve, 0))");
+    assert.equal(await read("document.body.dataset.page"), replacement === "sign-out" ? "auth" : "history");
+    assert.equal(await read("document.querySelector('#accountEmail').textContent"), replacement === "sign-out" ? "" : "new-account@example.test", `a pending foreground read must not undo ${replacement}`);
+  }
+});
+
 test("guest entry, invoice editor, responsive layout, draft, print, and offline shell", async (context) => {
   const chromePath = await findChromePath();
   if (!chromePath) return context.skip("Set CHROME_PATH to run browser coverage");
@@ -125,8 +215,8 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
     syncStatus: "Saved locally",
     storageNote: "Invoices and drafts exist only in this browser profile. Clearing site data, using private browsing, or changing devices can remove access. Download a backup regularly.",
     brandName: "Ledgerly",
-    headerLogo: "./ledgerly-mark.png?v=58",
-    invoiceLogo: "./eng-hoon-residences-logo.png?v=58",
+    headerLogo: "./ledgerly-mark.png?v=59",
+    invoiceLogo: "./eng-hoon-residences-logo.png?v=59",
     title: "Invoices | Ledgerly",
   });
 
@@ -1783,12 +1873,12 @@ test("guest entry, invoice editor, responsive layout, draft, print, and offline 
   assert.deepEqual(runtimeExceptions, [], `Unexpected runtime exceptions:\n${runtimeExceptions.join("\n")}`);
   assert.deepEqual(browserErrors, [], `Unexpected browser errors:\n${browserErrors.join("\n")}`);
 
-  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v58'))"));
+  const cacheReady = await waitFor(() => evaluate(page, "caches.keys().then(keys => keys.includes('invoice-studio-v59'))"));
   assert.equal(cacheReady, true);
   const workerSource = await readFile(join(ROOT, "sw.js"), "utf8");
   const handlers = {};
   const deletedCaches = [];
-  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v58", "unrelated-app-cache"];
+  const cacheKeys = ["invoice-studio-v1", "invoice-studio-v27", "invoice-studio-v28", "invoice-studio-v29", "invoice-studio-v30", "invoice-studio-v31", "invoice-studio-v32", "invoice-studio-v33", "invoice-studio-v34", "invoice-studio-v35", "invoice-studio-v36", "invoice-studio-v37", "invoice-studio-v38", "invoice-studio-v39", "invoice-studio-v40", "invoice-studio-v41", "invoice-studio-v42", "invoice-studio-v43", "invoice-studio-v44", "invoice-studio-v45", "invoice-studio-v46", "invoice-studio-v47", "invoice-studio-v48", "invoice-studio-v49", "invoice-studio-v59", "unrelated-app-cache"];
   const workerCache = { match: async () => undefined, put: async () => {} };
   const workerContext = {
     URL,

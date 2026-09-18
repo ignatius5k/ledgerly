@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import {
-  initializeAuth, indexedDBLocalPersistence, browserLocalPersistence,
+  initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence,
   inMemoryPersistence, onAuthStateChanged, signInWithEmailAndPassword,
   createUserWithEmailAndPassword, sendPasswordResetEmail, signOut,
   updatePassword, verifyPasswordResetCode, confirmPasswordReset,
@@ -57,21 +57,32 @@ function canonicalInvoice(value) {
 }
 
 export function createFirebaseInvoiceBackend(config, localBackend, options = {}) {
+  const environment = options.environment || (typeof window !== "undefined" ? window : null);
   const app = initializeApp(config, options.appName || "ledgerly");
   const auth = initializeAuth(app, {
     persistence: options.memoryAuth ? inMemoryPersistence
-      : [indexedDBLocalPersistence, browserLocalPersistence, inMemoryPersistence],
+      : [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence, inMemoryPersistence],
+    // Firebase pre-initializes its OAuth event iframe on Safari/iOS. Preparing
+    // it only after the click can lose the popup's return event when Safari
+    // suspends the original tab or a home-screen app during Google sign-in.
+    ...(options.memoryAuth ? {} : { popupRedirectResolver: browserPopupRedirectResolver }),
   });
   // Cloud invoices are kept in memory. Only unsynced drafts use the existing,
   // account-keyed outbox, so another login cannot read a previous user's cache.
-  const db = initializeFirestore(app, { localCache: memoryLocalCache() });
+  const userAgent = environment?.navigator?.userAgent || "";
+  const webKit = /AppleWebKit/i.test(userAgent) && !/(Chrome|Chromium|Edg|OPR)\//i.test(userAgent);
+  const db = initializeFirestore(app, {
+    localCache: memoryLocalCache(),
+    // WebKit can stall the streaming connection when returning from OAuth or
+    // restoring a page. Short-lived polls also work in iOS home-screen apps.
+    ...(webKit ? { experimentalForceLongPolling: true } : {}),
+  });
   const pdfStorageAvailable = typeof config.storageBucket === "string" && Boolean(config.storageBucket.trim());
   const storage = pdfStorageAvailable ? getStorage(app) : null;
   if (storage) {
     storage.maxUploadRetryTime = 15000;
     storage.maxOperationRetryTime = 15000;
   }
-  const environment = options.environment || (typeof window !== "undefined" ? window : null);
   if (options.emulators) {
     const hostname = environment?.location?.hostname;
     if (!options.memoryAuth && !["localhost", "127.0.0.1", "[::1]"].includes(hostname)) {
@@ -381,8 +392,8 @@ export function createFirebaseInvoiceBackend(config, localBackend, options = {})
     async signInWithGoogle() {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
-      // Supply the browser resolver only for this action; email login and local
-      // startup do not need to load Google's popup support scripts.
+      // Keep the popup flow on Pages: cross-domain redirects cannot reliably
+      // recover their result under Safari's third-party storage restrictions.
       await signInWithPopup(auth, provider, browserPopupRedirectResolver);
       return { session: session() };
     },
