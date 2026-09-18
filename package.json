@@ -17,7 +17,8 @@
     "build:firebase": "node scripts/build-firebase.js",
     "pretest": "npm run build:firebase",
     "test:firebase": "npm run build:firebase && firebase emulators:exec --config firebase.prototype.json --project demo-ledgerly --only auth,firestore,storage \"node --test --test-timeout=120000 --test-concurrency=1 tests/firebase.test.mjs tests/firebase-storage.test.mjs tests/firebase-browser.test.js\"",
-    "prototype": "npm run build:firebase && firebase emulators:exec --config firebase.prototype.json --project demo-ledgerly --only auth,firestore,storage \"node scripts/run-prototype.mjs\""
+    "prototype": "npm run build:firebase && firebase emulators:exec --config firebase.prototype.json --project demo-ledgerly --only auth,firestore,storage \"node scripts/run-prototype.mjs\"",
+    "test:webkit": "npm run build:firebase && firebase emulators:exec --config firebase.prototype.json --project demo-ledgerly --only auth,firestore,storage \"node --test --test-timeout=120000 tests/firebase-webkit.test.js\""
   },
   "dependencies": {
     "firebase": "12.19.0",
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.2",
     "esbuild": "0.28.2",
-    "firebase-tools": "15.30.0"
+    "firebase-tools": "15.30.0",
+    "playwright-core": "1.62.1"
   }
 }

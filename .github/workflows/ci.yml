@@ -65,6 +65,12 @@ jobs:
       - name: Verify Firebase authentication, invoice PDF storage, rules, and browser workflow
         run: npm run test:firebase
 
+      - name: Install WebKit for Safari engine coverage
+        run: npx playwright-core install --with-deps webkit
+
+      - name: Verify WebKit desktop and iPhone invoice workflows
+        run: npm run test:webkit
+
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
@@ -82,7 +88,7 @@ jobs:
           git diff --exit-code
 
       - name: Build Firebase app for GitHub Pages
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.ref == 'refs/heads/codex/firebase-prototype' && github.event_name == 'workflow_dispatch')
         env:
           FIREBASE_WEB_CONFIG: ${{ secrets.FIREBASE_WEB_CONFIG }}
         run: |
@@ -104,14 +110,14 @@ jobs:
           NODE
 
       - name: Upload GitHub Pages artifact
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.ref == 'refs/heads/codex/firebase-prototype' && github.event_name == 'workflow_dispatch')
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: dist
 
   deploy-pages:
     name: Deploy GitHub Pages
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.ref == 'refs/heads/codex/firebase-prototype' && github.event_name == 'workflow_dispatch')
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10

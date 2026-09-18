@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
 const { spawn } = require("node:child_process");
-const { mkdtemp, readFile, rm, stat } = require("node:fs/promises");
+const { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const test = require("node:test");
@@ -41,6 +41,115 @@ async function launchFirebaseBrowser(context) {
   await until("!document.querySelector('#authPage').hidden && document.querySelector('#appLoadingScreen').hidden");
   assert.equal(await read("window.invoiceBackend.provider"), "firebase");
   return { page, read, until, socket, exceptions, profile };
+}
+
+for (const width of [1440, 390]) {
+  test(`Firebase A/B feature round-trip at ${width}px: backup, search, duplicate, edit, PDF, print and delete`, { timeout: 90000 }, async (context) => {
+    const { page, read, until, socket, profile, exceptions } = await launchFirebaseBrowser(context);
+    await page.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: width < 500 });
+    const screenshot = async (name) => {
+      await until("document.querySelector('#appLoadingScreen').hidden");
+      const directory = join(__dirname, "../tmp/verification-round2/screenshots");
+      await mkdir(directory, { recursive: true });
+      const result = await page.send("Page.captureScreenshot", { format: "png" });
+      await writeFile(join(directory, `${width}-${name}.png`), Buffer.from(result.data, "base64"));
+    };
+    await screenshot("login");
+    await page.send("Page.addScriptToEvaluateOnNewDocument", { source: "window.confirm = () => true;" });
+    await read("window.confirm = () => true; true");
+    const browser = await connectCdp(socket);
+    context.after(() => browser.close());
+    await browser.send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: profile });
+    const email = `matrix-${width}-${Date.now()}@example.test`;
+    await read(`document.querySelector('#authEmail').value=${JSON.stringify(email)}; document.querySelector('#authPassword').value='Browser-test-123!'; document.querySelector('#createAccountButton').click(); true`);
+    await until("!document.querySelector('#invoiceListPage').hidden");
+
+    const backup = JSON.parse(await readFile(join(__dirname, "../fixtures/prototype-backup.json"), "utf8"));
+    const importBackup = (value) => read(`(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([${JSON.stringify(value)}], 'test-backup.json', {type:'application/json'}));
+      const input = document.querySelector('#importDataFile');
+      input.files = transfer.files; input.dispatchEvent(new Event('change', {bubbles:true}));
+    })()`);
+    await importBackup("{invalid json");
+    await until("document.querySelector('#toast').textContent.includes('not valid JSON')");
+    assert.equal(await read("document.querySelectorAll('.invoice-record').length"), 0);
+    await importBackup(JSON.stringify(backup));
+    await until("!document.querySelector('#invoiceListPage').hidden && document.querySelectorAll('.invoice-record').length === 4 && !document.querySelector('#draftNotice').hidden");
+
+    await screenshot("history");
+    await read("document.querySelector('#exportDataButton').click(); true");
+    const backupName = await waitFor(async () => (await readdir(profile)).find(name => /^ledgerly-account-backup-.*[.]json$/.test(name)), 15000);
+    const exported = JSON.parse(await readFile(join(profile, backupName), "utf8"));
+    assert.equal(exported.history.length, 4);
+    assert.equal(exported.draft.invoiceNumber, "DEMO-DRAFT");
+    assert.deepEqual(exported.history.find(record => record.id === 'demo-invoice-3').invoice.items, backup.history[2].invoice.items);
+
+    await read("document.querySelector('#continueDraftButton').click(); true");
+    await until("!document.querySelector('#editorPage').hidden");
+    await read(`document.querySelector(${JSON.stringify(width < 500 ? '#mobilePrintButton' : '#printButton')}).click(); true`);
+    assert.equal(await read("document.querySelector('#outputDialog').open"), false, "incomplete draft must not save or generate a PDF");
+    await read("document.querySelector('#invoiceListButton').click(); true");
+    const search = value => read(`(() => {const input=document.querySelector('#invoiceSearch');input.value=${JSON.stringify(value)};input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await search("no-such-matrix-customer");
+    await until("!document.querySelector('#historyNoResults').hidden");
+    await search("DEMO-RENTAL");
+    await until("document.querySelectorAll('.invoice-record').length === 1 && document.querySelector('[data-duplicate-invoice]')");
+    await read("window.confirm = () => false; document.querySelector('[data-duplicate-invoice]').click(); true");
+    assert.equal(await read("document.querySelector('#editorPage').hidden"), true, "cancelling replacement must preserve the draft");
+    await read("window.confirm = () => true; document.querySelector('[data-duplicate-invoice]').click(); true");
+    await until("document.querySelector('#editorTitle').textContent === 'Review duplicated invoice'");
+    const setField = (selector, value) => read(`(() => {const input=document.querySelector(${JSON.stringify(selector)});input.value=${JSON.stringify(value)};input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await setField("#billTo", "MATRIX DUPLICATE CUSTOMER");
+    await setField("#invoiceNumber", `MATRIX-${width}`);
+    await read(`document.querySelector(${JSON.stringify(width < 500 ? '#mobilePrintButton' : '#printButton')}).click(); true`);
+    await until("document.querySelector('#cloudPdfStatus').dataset.state === 'saved' && !document.querySelector('#savePdfButton').disabled");
+    await screenshot("pdf-ready");
+    const filename = await read("document.querySelector('#outputFileName').textContent");
+    await read("document.querySelector('#savePdfButton').click(); true");
+    const pdfPath = join(profile, filename);
+    await waitFor(async () => { try { return (await stat(pdfPath)).size > 20000; } catch { return false; } }, 15000);
+    const pdf = await readFile(pdfPath);
+    assert.equal((pdf.toString('latin1').match(/\/Type \/Page\b/g) || []).length, 1);
+    assert.match(pdf.toString('latin1'), /MATRIX DUPLICATE CUSTOMER/);
+    await read(`document.querySelector(${JSON.stringify(width < 500 ? '#mobilePrintButton' : '#printButton')}).click(); true`);
+    await until("document.querySelector('#outputDialog').open && document.querySelector('#cloudPdfStatus').dataset.state === 'saved' && !document.querySelector('#printNowButton').disabled");
+    await read(`const makeUrl = URL.createObjectURL.bind(URL); URL.createObjectURL = blob => {window.printBlob = blob; return makeUrl(blob);}; window.printTarget = {closed:false, location:{replace(url){window.printUrl=url;}}, document:{body:{style:{}},write(){}}, addEventListener(){}, close(){this.closed=true;}}; window.open=()=>window.printTarget; document.querySelector('#printNowButton').click(); true`);
+    await until("typeof window.printUrl === 'string' && window.printUrl.startsWith('blob:')");
+    assert.equal(await read("window.printBlob.type"), "application/pdf");
+    const printHash = await read("window.printBlob.arrayBuffer().then(buffer=>crypto.subtle.digest('SHA-256',buffer)).then(hash=>Array.from(new Uint8Array(hash),byte=>byte.toString(16).padStart(2,'0')).join(''))");
+    const currentPdfHash = await read(`window.invoiceBackend.getSession().then(async session => {
+      const record = (await window.invoiceBackend.listInvoices(session.user.id, {query:'MATRIX-${width}'})).records[0];
+      const blob = await window.invoiceBackend.loadInvoicePdf(session.user.id, record);
+      const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+      return Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
+    })`);
+    assert.equal(printHash, currentPdfHash, "print must use the exact current stored PDF");
+    await read("document.querySelector('#cancelOutputDialogButton').click(); document.querySelector('#invoiceListButton').click(); true");
+    await search(`MATRIX-${width}`);
+    await until("document.querySelectorAll('.invoice-record').length === 1 && document.querySelector('[data-edit-invoice]')");
+    const duplicateId = await read("document.querySelector('[data-edit-invoice]').dataset.editInvoice");
+    assert.notEqual(duplicateId, "demo-invoice-1");
+    await read("document.querySelector('[data-edit-invoice]').click(); true");
+    await until("document.querySelector('#editorTitle').textContent === 'Edit invoice'");
+    await setField('[data-item-field="price"]', '95');
+    await read(`document.querySelector(${JSON.stringify(width < 500 ? '#mobilePrintButton' : '#printButton')}).click(); true`);
+    await until("document.querySelector('#cloudPdfStatus').dataset.state === 'saved' && !document.querySelector('#cancelOutputDialogButton').disabled");
+    const saved = await read(`window.invoiceBackend.getSession().then(async session => (await window.invoiceBackend.listInvoices(session.user.id)).records.find(record=>record.id===${JSON.stringify(duplicateId)}))`);
+    assert.equal(saved.revision, 3);
+    assert.equal(saved.invoice.items[0].price, 95);
+    await read("document.querySelector('#cancelOutputDialogButton').click(); document.querySelector('#invoiceListButton').click(); true");
+    await search(`MATRIX-${width}`);
+    await until("document.querySelectorAll('.invoice-record').length === 1 && document.querySelector('[data-delete-invoice]')");
+    await read("window.confirm=()=>false; document.querySelector('[data-delete-invoice]').click(); true");
+    assert.equal(await read("document.querySelectorAll('.invoice-record').length"), 1);
+    await read("window.confirm=()=>true; document.querySelector('[data-delete-invoice]').click(); true");
+    await until("!document.querySelector('#historyNoResults').hidden");
+    const remaining = await read("window.invoiceBackend.getSession().then(session=>window.invoiceBackend.listInvoices(session.user.id))");
+    assert.equal(remaining.total, 4);
+    assert.equal(remaining.records.find(record=>record.id==='demo-invoice-1').invoice.items[0].price, 90, "editing the duplicate must preserve the original");
+    assert.deepEqual(exceptions, []);
+  });
 }
 
 test("Firebase mobile signup, invoice save, session reload, offline draft recovery and account isolation", { timeout: 90000 }, async (context) => {
